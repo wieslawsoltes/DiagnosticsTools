@@ -40,3 +40,5 @@ dotnet build DiagnosticsTools.sln
 ## Attribution
 
 This project contains code originally authored by the AvaloniaUI team and contributors. We are grateful for their work in creating these powerful diagnostic tools for the Avalonia community.
+
+- Credit to [BAndysc](https://github.com/BAndysc) for the VirtualizedTreeView work contributed in [AvaloniaUI/Avalonia#14417](https://github.com/AvaloniaUI/Avalonia/pull/14417).
