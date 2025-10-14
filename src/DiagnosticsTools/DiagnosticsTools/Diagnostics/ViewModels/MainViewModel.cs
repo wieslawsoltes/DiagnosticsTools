@@ -10,6 +10,7 @@ using Avalonia.Rendering;
 using System.Collections.Generic;
 using Avalonia.Media;
 using Avalonia.Diagnostics.Metrics;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels.Metrics;
 
 namespace Avalonia.Diagnostics.ViewModels
@@ -45,13 +46,17 @@ namespace Avalonia.Diagnostics.ViewModels
         private PropertyChangedEventHandler? _combinedTreeScopeHandler;
         private PropertyChangedEventHandler? _logicalTreeScopeHandler;
         private PropertyChangedEventHandler? _visualTreeScopeHandler;
+        private ISourceInfoService _sourceInfoService;
+        private ISourceNavigator _sourceNavigator;
 
-        public MainViewModel(AvaloniaObject root)
+        public MainViewModel(AvaloniaObject root, ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
         {
             _root = root;
-            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties);
-            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties);
-            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties);
+            _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
+            _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
+            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator);
+            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator);
+            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator);
             AttachScopePersistence(
                 _combinedTree,
                 () => _combinedTreeScopeKey,
@@ -431,6 +436,31 @@ namespace Avalonia.Diagnostics.ViewModels
             SelectedTab = MapLaunchViewToTab(options.LaunchView);
 
             _hotKeys.SetOptions(options);
+        }
+
+        public void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
+        {
+            if (sourceInfoService is null)
+            {
+                throw new ArgumentNullException(nameof(sourceInfoService));
+            }
+
+            if (sourceNavigator is null)
+            {
+                throw new ArgumentNullException(nameof(sourceNavigator));
+            }
+
+            _sourceInfoService = sourceInfoService;
+            _sourceNavigator = sourceNavigator;
+
+            _logicalTree.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
+            _visualTree.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
+            _combinedTree.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
+
+            if (Content is TreePageViewModel tree)
+            {
+                tree.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
+            }
         }
 
         public bool ShowImplementedInterfaces

@@ -13,7 +13,9 @@ namespace DiagnosticsTools.Tests
         public void MainViewModel_defaults_to_combined_tab()
         {
             var root = new StackPanel();
-            using var viewModel = new MainViewModel(root);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var viewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
 
             Assert.Equal(0, viewModel.SelectedTab);
             Assert.IsType<CombinedTreePageViewModel>(viewModel.Content);
@@ -23,7 +25,9 @@ namespace DiagnosticsTools.Tests
         public void MainViewModel_set_options_activates_requested_tab()
         {
             var root = new Button();
-            using var viewModel = new MainViewModel(root);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var viewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
 
             viewModel.SetOptions(new DevToolsOptions
             {
@@ -41,7 +45,9 @@ namespace DiagnosticsTools.Tests
             var child = new Button();
             root.Children.Add(child);
 
-            using var viewModel = new MainViewModel(root);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var viewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
 
             viewModel.RequestTreeNavigateTo(child, isVisualTree: false);
             Assert.Equal(1, viewModel.SelectedTab);

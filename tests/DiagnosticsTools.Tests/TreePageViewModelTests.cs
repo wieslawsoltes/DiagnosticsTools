@@ -16,8 +16,10 @@ public class TreePageViewModelTests
         var child = new Button { Name = "ChildButton" };
         root.Children.Add(child);
 
-        using var mainViewModel = new MainViewModel(root);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+        var sourceInfoService = new StubSourceInfoService();
+        var sourceNavigator = new StubSourceNavigator();
+        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
 
         treeViewModel.TreeFilter.FilterString = "StackPanel";
 
@@ -35,8 +37,10 @@ public class TreePageViewModelTests
         var child = new Button { Name = "ChildButton" };
         root.Children.Add(child);
 
-        using var mainViewModel = new MainViewModel(root);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+        var sourceInfoService = new StubSourceInfoService();
+        var sourceNavigator = new StubSourceNavigator();
+        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
 
         treeViewModel.TreeFilter.FilterString = "Button";
 
@@ -53,8 +57,10 @@ public class TreePageViewModelTests
         var child = new Button { Name = "ChildButton" };
         root.Children.Add(child);
 
-        using var mainViewModel = new MainViewModel(root);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+        var sourceInfoService = new StubSourceInfoService();
+        var sourceNavigator = new StubSourceNavigator();
+        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
 
         var rootNode = Assert.Single(treeViewModel.Nodes);
         var childNode = Assert.Single(rootNode.Children);
@@ -75,8 +81,10 @@ public class TreePageViewModelTests
         var child = new Button { Name = "PART_Control" };
         root.Children.Add(child);
 
-        using var mainViewModel = new MainViewModel(root);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+        var sourceInfoService = new StubSourceInfoService();
+        var sourceNavigator = new StubSourceNavigator();
+        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Name;
         treeViewModel.TreeFilter.FilterString = "PART_Control";
@@ -95,8 +103,10 @@ public class TreePageViewModelTests
         child.Classes.Add("highlighted");
         root.Children.Add(child);
 
-        using var mainViewModel = new MainViewModel(root);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+        var sourceInfoService = new StubSourceInfoService();
+        var sourceNavigator = new StubSourceNavigator();
+        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Classes;
         treeViewModel.TreeFilter.FilterString = ".highlighted";

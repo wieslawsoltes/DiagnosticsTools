@@ -177,7 +177,9 @@ namespace DiagnosticsTools.Tests
         public void MainViewModel_exposes_metrics_tab()
         {
             var control = new Button();
-            using var mainViewModel = new MainViewModel(control);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
 
             mainViewModel.SelectedTab = 4;
 

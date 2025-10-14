@@ -75,9 +75,11 @@ namespace DiagnosticsTools.Tests
             control.ApplyTemplate();
             Dispatcher.UIThread.RunJobs();
 
-            using var mainViewModel = new MainViewModel(control);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned);
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator);
 
             var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
             var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
@@ -97,9 +99,11 @@ namespace DiagnosticsTools.Tests
             control.ApplyTemplate();
             Dispatcher.UIThread.RunJobs();
 
-            using var mainViewModel = new MainViewModel(control);
+            var sourceInfoService = new StubSourceInfoService();
+            var sourceNavigator = new StubSourceNavigator();
+            using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned);
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator);
 
             combinedTree.TreeFilter.FilterString = "Border";
 

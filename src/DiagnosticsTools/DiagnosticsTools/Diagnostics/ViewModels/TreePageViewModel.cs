@@ -1,11 +1,14 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -20,13 +23,24 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _isScoped;
         private readonly ISet<string> _pinnedProperties;
         private TreeSearchField _selectedTreeSearchField = TreeSearchField.TypeName;
+        private readonly ConcurrentDictionary<TreeNode, Task<SourceInfo?>> _sourceInfoCache = new();
+        private ISourceInfoService _sourceInfoService;
+        private ISourceNavigator _sourceNavigator;
+        private SourceInfo? _selectedNodeSourceInfo;
 
-        public TreePageViewModel(MainViewModel mainView, TreeNode[] nodes, ISet<string> pinnedProperties)
+        public TreePageViewModel(
+            MainViewModel mainView,
+            TreeNode[] nodes,
+            ISet<string> pinnedProperties,
+            ISourceInfoService sourceInfoService,
+            ISourceNavigator sourceNavigator)
         {
             MainView = mainView;
             _rootNodes = nodes;
             _nodes = nodes;
             _pinnedProperties = pinnedProperties;
+            _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
+            _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             PropertiesFilter = new FilterViewModel();
             PropertiesFilter.RefreshFilter += (s, e) => Details?.PropertiesView?.Refresh();
 
@@ -85,14 +99,38 @@ namespace Avalonia.Diagnostics.ViewModels
                 if (RaiseAndSetIfChanged(ref _selectedNode, value))
                 {
                     Details = value != null ?
-                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties) :
+                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator) :
                         null;
                     Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
                     Details?.UpdateStyleFilters();
+                    Details?.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
                     RaisePropertyChanged(nameof(CanScopeToSubTree));
+                    RaisePropertyChanged(nameof(CanNavigateToSource));
+                    SelectedNodeSourceInfo = null;
+                    _ = UpdateSelectedNodeSourceInfoAsync(value);
                 }
             }
         }
+
+        public SourceInfo? SelectedNodeSourceInfo
+        {
+            get => _selectedNodeSourceInfo;
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _selectedNodeSourceInfo, value))
+                {
+                    RaisePropertyChanged(nameof(SelectedNodeSourceSummary));
+                    RaisePropertyChanged(nameof(HasSelectedNodeSource));
+                    RaisePropertyChanged(nameof(CanNavigateToSource));
+                }
+            }
+        }
+
+        public string? SelectedNodeSourceSummary => SelectedNodeSourceInfo?.DisplayPath;
+
+        public bool HasSelectedNodeSource => SelectedNodeSourceInfo is not null;
+
+    public bool CanNavigateToSource => HasSelectedNodeSource;
 
         public ControlDetailsViewModel? Details
         {
@@ -118,6 +156,58 @@ namespace Avalonia.Diagnostics.ViewModels
             _details?.Dispose();
         }
 
+        public async void NavigateToSource()
+        {
+            var node = SelectedNode;
+            if (node is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                if (info is null)
+                {
+                    return;
+                }
+
+                await _sourceNavigator.NavigateAsync(info).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Navigation is best-effort.
+            }
+        }
+
+        public void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
+        {
+            if (sourceInfoService is null)
+            {
+                throw new ArgumentNullException(nameof(sourceInfoService));
+            }
+
+            if (sourceNavigator is null)
+            {
+                throw new ArgumentNullException(nameof(sourceNavigator));
+            }
+
+            if (!ReferenceEquals(_sourceInfoService, sourceInfoService))
+            {
+                _sourceInfoCache.Clear();
+                _sourceInfoService = sourceInfoService;
+            }
+
+            _sourceNavigator = sourceNavigator;
+
+            Details?.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
+
+            if (SelectedNode is not null)
+            {
+                _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+            }
+        }
+
         public TreeNode? FindNode(Control control)
         {
             foreach (var node in Nodes)
@@ -131,6 +221,44 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return null;
+        }
+
+        private async Task<SourceInfo?> EnsureSourceInfoAsync(TreeNode node)
+        {
+            var task = _sourceInfoCache.GetOrAdd(node, ResolveNodeSourceInfoAsync);
+            var info = await task.ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() => node.UpdateSourceInfo(info));
+            return info;
+        }
+
+        private async Task<SourceInfo?> ResolveNodeSourceInfoAsync(TreeNode node)
+        {
+            try
+            {
+                var info = await _sourceInfoService.GetForAvaloniaObjectAsync(node.Visual).ConfigureAwait(false);
+                if (info is null)
+                {
+                    info = await _sourceInfoService.GetForMemberAsync(node.Visual.GetType()).ConfigureAwait(false);
+                }
+
+                return info;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task UpdateSelectedNodeSourceInfoAsync(TreeNode? node)
+        {
+            if (node is null)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => SelectedNodeSourceInfo = null);
+                return;
+            }
+
+            var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() => SelectedNodeSourceInfo = info);
         }
 
         public void SelectControl(Control control)

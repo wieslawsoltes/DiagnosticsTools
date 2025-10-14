@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,7 +16,7 @@ namespace Avalonia.Diagnostics.SourceNavigation
         private static readonly Guid SourceLinkGuid = new("cc110556-a091-4d38-9f06-3330a3c5c2c3");
 
         private readonly string _assemblyLocation;
-        private FileStream? _pdbStream;
+    private FileStream? _pdbStream;
         private MetadataReaderProvider? _readerProvider;
         private SourceLinkMap? _sourceLink;
         private readonly SemaphoreSlim _gate = new(1, 1);
@@ -24,6 +25,12 @@ namespace Avalonia.Diagnostics.SourceNavigation
         public PortablePdbResolver(string assemblyLocation)
         {
             _assemblyLocation = assemblyLocation;
+        }
+
+        public async ValueTask<bool> EnsureMetadataAsync()
+        {
+            var reader = await GetReaderAsync().ConfigureAwait(false);
+            return reader is not null;
         }
 
         public async ValueTask<SourceInfo?> TryGetSourceInfoAsync(MethodBase method)
@@ -198,16 +205,48 @@ namespace Avalonia.Diagnostics.SourceNavigation
                 }
 
                 var pdbPath = Path.ChangeExtension(_assemblyLocation, ".pdb");
-                if (string.IsNullOrEmpty(pdbPath) || !File.Exists(pdbPath))
+                if (!string.IsNullOrEmpty(pdbPath) && File.Exists(pdbPath))
+                {
+                    _pdbStream = new FileStream(pdbPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    _readerProvider = MetadataReaderProvider.FromPortablePdbStream(_pdbStream, MetadataStreamOptions.LeaveOpen);
+                    var reader = _readerProvider.GetMetadataReader();
+                    _sourceLink = TryReadSourceLink(reader);
+                    return reader;
+                }
+
+                if (!File.Exists(_assemblyLocation))
                 {
                     return null;
                 }
 
-                _pdbStream = new FileStream(pdbPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                _readerProvider = MetadataReaderProvider.FromPortablePdbStream(_pdbStream, MetadataStreamOptions.LeaveOpen);
-                var reader = _readerProvider.GetMetadataReader();
-                _sourceLink = TryReadSourceLink(reader);
-                return reader;
+                using var assemblyStream = new FileStream(_assemblyLocation, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var peReader = new PEReader(assemblyStream, PEStreamOptions.PrefetchEntireImage);
+                foreach (var entry in peReader.ReadDebugDirectory())
+                {
+                    switch (entry.Type)
+                    {
+                        case DebugDirectoryEntryType.EmbeddedPortablePdb:
+                            _readerProvider = peReader.ReadEmbeddedPortablePdbDebugDirectoryData(entry);
+                            var embeddedReader = _readerProvider.GetMetadataReader();
+                            _sourceLink = TryReadSourceLink(embeddedReader);
+                            return embeddedReader;
+
+                        case DebugDirectoryEntryType.CodeView:
+                            var codeView = peReader.ReadCodeViewDebugDirectoryData(entry);
+                            if (!string.IsNullOrEmpty(codeView.Path) && File.Exists(codeView.Path))
+                            {
+                                _pdbStream = new FileStream(codeView.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                                _readerProvider = MetadataReaderProvider.FromPortablePdbStream(_pdbStream, MetadataStreamOptions.LeaveOpen);
+                                var externalReader = _readerProvider.GetMetadataReader();
+                                _sourceLink = TryReadSourceLink(externalReader);
+                                return externalReader;
+                            }
+
+                            break;
+                    }
+                }
+
+                return null;
             }
             finally
             {

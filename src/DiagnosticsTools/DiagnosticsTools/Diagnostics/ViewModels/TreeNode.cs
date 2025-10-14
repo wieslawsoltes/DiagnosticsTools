@@ -5,6 +5,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Reactive;
@@ -18,6 +19,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private string _classes;
         private bool _isExpanded;
         private bool _isVisible = true;
+        private SourceInfo? _sourceInfo;
 
         protected TreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customTypeName = null)
         {
@@ -126,6 +128,23 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public event NotifyCollectionChangedEventHandler? CollectionChanged;
 
+        public SourceInfo? SourceInfo
+        {
+            get => _sourceInfo;
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _sourceInfo, value))
+                {
+                    RaisePropertyChanged(nameof(SourceSummary));
+                    RaisePropertyChanged(nameof(HasSource));
+                }
+            }
+        }
+
+        public string? SourceSummary => SourceInfo?.DisplayPath;
+
+        public bool HasSource => SourceInfo is not null;
+
         public void Dispose()
         {
             _classesSubscription?.Dispose();
@@ -143,6 +162,11 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             CollectionChanged?.Invoke(this, e);
             RaisePropertyChanged(nameof(HasChildren));
+        }
+
+        internal void UpdateSourceInfo(SourceInfo? info)
+        {
+            SourceInfo = info;
         }
     }
 }

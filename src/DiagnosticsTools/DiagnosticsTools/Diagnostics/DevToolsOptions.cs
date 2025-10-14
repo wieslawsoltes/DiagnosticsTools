@@ -1,4 +1,5 @@
-﻿using Avalonia.Input;
+﻿using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 
@@ -62,5 +63,15 @@ namespace Avalonia.Diagnostics
         /// Gets or inits the <see cref="HotKeyConfiguration" /> used to activate DevTools features
         /// </summary>
         public HotKeyConfiguration HotKeys { get; init; } = new();
+
+        /// <summary>
+        /// Gets or sets the source information service responsible for resolving navigation targets.
+        /// </summary>
+        public ISourceInfoService? SourceInfoService { get; set; }
+
+        /// <summary>
+        /// Gets or sets the navigator used to open resolved source locations.
+        /// </summary>
+        public ISourceNavigator? SourceNavigator { get; set; }
     }
 }

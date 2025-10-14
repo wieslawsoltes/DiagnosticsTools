@@ -7,6 +7,7 @@ using Avalonia.Controls.Diagnostics;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Diagnostics.ViewModels;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Markup.Xaml;
@@ -24,6 +25,10 @@ namespace Avalonia.Diagnostics.Views
         private AvaloniaObject? _root;
         private PixelPoint _lastPointerPosition;
         private HotKeyConfiguration? _hotKeys;
+    private DevToolsOptions _options = new();
+    private ISourceInfoService? _sourceInfoService;
+    private ISourceNavigator? _sourceNavigator;
+    private bool _ownsSourceInfoService;
 
         public MainWindow()
         {
@@ -84,7 +89,8 @@ namespace Avalonia.Diagnostics.Views
                     if (_root is  ICloseable newClosable)
                     {
                         newClosable.Closed += RootClosed;
-                        DataContext = new MainViewModel(_root);
+                        var services = EnsureSourceNavigationServices();
+                        DataContext = new MainViewModel(_root, services.Service, services.Navigator);
                     }
                     else
                     {
@@ -115,6 +121,8 @@ namespace Avalonia.Diagnostics.Views
             }
 
             ((MainViewModel?)DataContext)?.Dispose();
+            DisposeOwnedSourceService();
+            _sourceInfoService = null;
         }
 
         private void InitializeComponent()
@@ -296,10 +304,17 @@ namespace Avalonia.Diagnostics.Views
 
         public void SetOptions(DevToolsOptions options)
         {
-            _hotKeys = options.HotKeys;
+            _options = options ?? new DevToolsOptions();
+            _hotKeys = _options.HotKeys;
 
-            (DataContext as MainViewModel)?.SetOptions(options);
-            if (options.ThemeVariant is { } themeVariant)
+            var services = EnsureSourceNavigationServices();
+            if (DataContext is MainViewModel vm)
+            {
+                vm.UpdateSourceNavigation(services.Service, services.Navigator);
+                vm.SetOptions(_options);
+            }
+
+            if (_options.ThemeVariant is { } themeVariant)
             {
                 RequestedThemeVariant = themeVariant;
             }
@@ -310,6 +325,40 @@ namespace Avalonia.Diagnostics.Views
             if (control is { })
             {
                 (DataContext as MainViewModel)?.SelectControl(control);
+            }
+        }
+
+        private (ISourceInfoService Service, ISourceNavigator Navigator) EnsureSourceNavigationServices()
+        {
+            if (_options.SourceInfoService is { } providedService && !ReferenceEquals(providedService, _sourceInfoService))
+            {
+                DisposeOwnedSourceService();
+                _sourceInfoService = providedService;
+                _ownsSourceInfoService = false;
+            }
+
+            if (_sourceInfoService is null)
+            {
+                _sourceInfoService = new SourceInfoService();
+                _ownsSourceInfoService = true;
+            }
+
+            if (_options.SourceNavigator is { } providedNavigator)
+            {
+                _sourceNavigator = providedNavigator;
+            }
+
+            _sourceNavigator ??= new DefaultSourceNavigator();
+
+            return (_sourceInfoService, _sourceNavigator);
+        }
+
+        private void DisposeOwnedSourceService()
+        {
+            if (_ownsSourceInfoService && _sourceInfoService is IDisposable disposable)
+            {
+                disposable.Dispose();
+                _ownsSourceInfoService = false;
             }
         }
     }

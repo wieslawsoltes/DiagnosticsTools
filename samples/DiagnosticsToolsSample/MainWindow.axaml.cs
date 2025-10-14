@@ -125,7 +125,9 @@ public partial class MainWindow : Window
 
         if (source is ControlTheme theme)
         {
-            return $"ControlTheme[{theme.TargetType?.Name}]";
+            var ownerType = theme.Owner?.GetType().FullName ?? "<no-owner>";
+            var parentType = theme.Parent?.GetType().FullName ?? "<no-parent>";
+            return $"ControlTheme[{theme.TargetType?.Name}] owner={ownerType} parent={parentType}";
         }
 
         if (source is SetterBase setter)

@@ -185,7 +185,16 @@
                   </Border.IsVisible>
                   <Expander IsExpanded="True" Margin="0" Padding="8,0" ContentTransition="{x:Null}" >
                     <Expander.Header>
-                      <TextBlock Grid.Row="0" Text="{Binding Description}" />
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Description}" />
+                        <Button Content="SRC"
+                                FontSize="10"
+                                FontWeight="Bold"
+                                Command="{Binding NavigateToSource}"
+                                IsEnabled="{Binding CanNavigateToSource}"
+                                ToolTip.Tip="{Binding SourceSummary}"
+                                IsVisible="{Binding SourceInfo, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                      </StackPanel>
                     </Expander.Header>
 
                     <ItemsControl Margin="20,0,0,0" Grid.Row="1" ItemsSource="{Binding Setters}">

@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Data;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Input.Platform;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
+using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -14,11 +17,22 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly IValueFrameDiagnostic _valueFrame;
         private bool _isActive;
         private bool _isVisible;
+        private ISourceInfoService _sourceInfoService;
+        private ISourceNavigator _sourceNavigator;
+        private SourceInfo? _sourceInfo;
+        private Task? _sourceInfoTask;
 
-        public ValueFrameViewModel(StyledElement styledElement, IValueFrameDiagnostic valueFrame, IClipboard? clipboard)
+        public ValueFrameViewModel(
+            StyledElement styledElement,
+            IValueFrameDiagnostic valueFrame,
+            IClipboard? clipboard,
+            ISourceInfoService sourceInfoService,
+            ISourceNavigator sourceNavigator)
         {
             _valueFrame = valueFrame;
             IsVisible = true;
+            _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
+            _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
 
             var source = SourceToString(_valueFrame.Source);
             Description = (_valueFrame.Type, source) switch
@@ -63,6 +77,7 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             Update();
+            _ = LoadSourceInfoAsync();
         }
 
         public bool IsActive
@@ -84,6 +99,72 @@ namespace Avalonia.Diagnostics.ViewModels
         public void Update()
         {
             IsActive = _valueFrame.IsActive;
+        }
+
+        public SourceInfo? SourceInfo
+        {
+            get => _sourceInfo;
+            private set
+            {
+                if (Equals(_sourceInfo, value))
+                {
+                    return;
+                }
+
+                _sourceInfo = value;
+                RaisePropertyChanged(nameof(SourceInfo));
+                RaisePropertyChanged(nameof(SourceSummary));
+                RaisePropertyChanged(nameof(HasSource));
+                RaisePropertyChanged(nameof(CanNavigateToSource));
+            }
+        }
+
+        public string? SourceSummary => SourceInfo?.DisplayPath;
+
+        public bool HasSource => SourceInfo is not null;
+
+        public bool CanNavigateToSource => SourceInfo is not null;
+
+        public async void NavigateToSource()
+        {
+            try
+            {
+                await LoadSourceInfoAsync().ConfigureAwait(false);
+                if (SourceInfo is null)
+                {
+                    return;
+                }
+
+                await _sourceNavigator.NavigateAsync(SourceInfo).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Navigation failures are non-fatal.
+            }
+        }
+
+        internal void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
+        {
+            if (sourceInfoService is null)
+            {
+                throw new ArgumentNullException(nameof(sourceInfoService));
+            }
+
+            if (sourceNavigator is null)
+            {
+                throw new ArgumentNullException(nameof(sourceNavigator));
+            }
+
+            var serviceChanged = !ReferenceEquals(_sourceInfoService, sourceInfoService);
+            _sourceInfoService = sourceInfoService;
+            _sourceNavigator = sourceNavigator;
+
+            if (serviceChanged)
+            {
+                _sourceInfoTask = null;
+                SourceInfo = null;
+                _ = LoadSourceInfoAsync();
+            }
         }
         
         private static (object resourceKey, bool isDynamic)? GetResourceInfo(object? value)
@@ -148,6 +229,32 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return null;
+        }
+
+        private Task LoadSourceInfoAsync()
+        {
+            var existing = _sourceInfoTask;
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            async Task ResolveAsync()
+            {
+                try
+                {
+                    var info = await _sourceInfoService.GetForValueFrameAsync(_valueFrame).ConfigureAwait(false);
+                    await Dispatcher.UIThread.InvokeAsync(() => SourceInfo = info);
+                }
+                catch
+                {
+                    // Ignore resolution failures.
+                }
+            }
+
+            var task = ResolveAsync();
+            _sourceInfoTask = task;
+            return task;
         }
     }
 }

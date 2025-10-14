@@ -9,6 +9,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Metadata;
 using Avalonia.Data;
+using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -40,8 +41,15 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             new DataGridComparerSortDescription(PropertyComparer.Instance!, ListSortDirection.Ascending),
         };
+        private ISourceInfoService _sourceInfoService;
+        private ISourceNavigator _sourceNavigator;
 
-        public ControlDetailsViewModel(TreePageViewModel treePage, AvaloniaObject avaloniaObject, ISet<string> pinnedProperties)
+        public ControlDetailsViewModel(
+            TreePageViewModel treePage,
+            AvaloniaObject avaloniaObject,
+            ISet<string> pinnedProperties,
+            ISourceInfoService sourceInfoService,
+            ISourceNavigator sourceNavigator)
         {
             _avaloniaObject = avaloniaObject;
             _pinnedProperties = pinnedProperties;
@@ -49,6 +57,8 @@ namespace Avalonia.Diagnostics.ViewModels
             Layout = avaloniaObject is Visual visual
                 ? new ControlLayoutViewModel(visual)
                 : default;
+            _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
+            _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
 
             NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
 
@@ -75,7 +85,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 foreach (var appliedStyle in styleDiagnostics.AppliedFrames.OrderBy(s => s.Priority))
                 {
-                    AppliedFrames.Add(new ValueFrameViewModel(styledElement, appliedStyle, clipboard));
+                    AppliedFrames.Add(new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator));
                 }
 
                 UpdateStyles();
@@ -167,6 +177,27 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 style.IsVisible = hasVisibleSetter;
+            }
+        }
+
+        public void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
+        {
+            if (sourceInfoService is null)
+            {
+                throw new ArgumentNullException(nameof(sourceInfoService));
+            }
+
+            if (sourceNavigator is null)
+            {
+                throw new ArgumentNullException(nameof(sourceNavigator));
+            }
+
+            _sourceInfoService = sourceInfoService;
+            _sourceNavigator = sourceNavigator;
+
+            foreach (var frame in AppliedFrames)
+            {
+                frame.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
             }
         }
 

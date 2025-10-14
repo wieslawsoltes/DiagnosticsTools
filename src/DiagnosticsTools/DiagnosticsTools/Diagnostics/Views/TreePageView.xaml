@@ -73,6 +73,11 @@
               <Binding Path="IsInTemplate" FallbackValue="False"/>
             </StackPanel.Tag>
             <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
+            <TextBlock Text="SRC"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       IsVisible="{Binding HasSource}"
+                       ToolTip.Tip="{Binding SourceSummary}"/>
             <TextBlock Text="{Binding Classes}"/>
             <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
           </StackPanel>
@@ -80,6 +85,9 @@
       </virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
       <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
         <MenuFlyout>
+          <MenuItem Header="Navigate to source"
+                    Command="{Binding NavigateToSource}"
+                    IsEnabled="{Binding CanNavigateToSource}" />
           <MenuItem Header="Copy">
             <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
             <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
