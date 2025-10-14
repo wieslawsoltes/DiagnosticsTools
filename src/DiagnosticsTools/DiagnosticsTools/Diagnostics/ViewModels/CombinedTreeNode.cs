@@ -25,7 +25,7 @@ namespace Avalonia.Diagnostics.ViewModels
             Role = role;
             TemplateName = templateName;
             TemplateOwner = templateOwner;
-            Children = new CombinedTreeNodeCollection(this);
+            Children = RegisterChildren(new CombinedTreeNodeCollection(this));
         }
 
         public enum CombinedNodeRole

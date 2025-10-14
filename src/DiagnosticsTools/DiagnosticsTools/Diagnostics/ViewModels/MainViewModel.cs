@@ -39,6 +39,12 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly HashSet<string> _pinnedProperties = new();
         private IBrush? _FocusHighlighter;
         private IDisposable? _currentFocusHighlightAdorner = default;
+        private string? _combinedTreeScopeKey;
+        private string? _logicalTreeScopeKey;
+        private string? _visualTreeScopeKey;
+        private PropertyChangedEventHandler? _combinedTreeScopeHandler;
+        private PropertyChangedEventHandler? _logicalTreeScopeHandler;
+        private PropertyChangedEventHandler? _visualTreeScopeHandler;
 
         public MainViewModel(AvaloniaObject root)
         {
@@ -46,6 +52,21 @@ namespace Avalonia.Diagnostics.ViewModels
             _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties);
             _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties);
             _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties);
+            AttachScopePersistence(
+                _combinedTree,
+                () => _combinedTreeScopeKey,
+                value => _combinedTreeScopeKey = value,
+                ref _combinedTreeScopeHandler);
+            AttachScopePersistence(
+                _logicalTree,
+                () => _logicalTreeScopeKey,
+                value => _logicalTreeScopeKey = value,
+                ref _logicalTreeScopeHandler);
+            AttachScopePersistence(
+                _visualTree,
+                () => _visualTreeScopeKey,
+                value => _visualTreeScopeKey = value,
+                ref _visualTreeScopeHandler);
             _events = new EventsPageViewModel(this);
             _hotKeys = new HotKeyPageViewModel();
             _metricsListener = new MetricsListenerService();
@@ -278,6 +299,9 @@ namespace Avalonia.Diagnostics.ViewModels
             if (KeyboardDevice.Instance is not null)
                 KeyboardDevice.Instance.PropertyChanged -= KeyboardPropertyChanged;
             _pointerOverSubscription.Dispose();
+            DetachScopePersistence(_combinedTree, ref _combinedTreeScopeHandler);
+            DetachScopePersistence(_logicalTree, ref _logicalTreeScopeHandler);
+            DetachScopePersistence(_visualTree, ref _visualTreeScopeHandler);
             _logicalTree.Dispose();
             _visualTree.Dispose();
             _combinedTree.Dispose();
@@ -287,6 +311,40 @@ namespace Avalonia.Diagnostics.ViewModels
             if (TryGetRenderer() is { } renderer)
             {
                 renderer.Diagnostics.DebugOverlays = RendererDebugOverlays.None;
+            }
+        }
+
+        private void AttachScopePersistence(
+            TreePageViewModel tree,
+            Func<string?> getKey,
+            Action<string?> setKey,
+            ref PropertyChangedEventHandler? handler)
+        {
+            var existingKey = getKey();
+            if (!string.IsNullOrEmpty(existingKey))
+            {
+                tree.RestoreScopeFromKey(existingKey);
+            }
+
+            setKey(tree.ScopedNodeKey);
+
+            handler = (_, e) =>
+            {
+                if (e.PropertyName == nameof(TreePageViewModel.ScopedNodeKey))
+                {
+                    setKey(tree.ScopedNodeKey);
+                }
+            };
+
+            tree.PropertyChanged += handler;
+        }
+
+        private static void DetachScopePersistence(TreePageViewModel tree, ref PropertyChangedEventHandler? handler)
+        {
+            if (handler is not null)
+            {
+                tree.PropertyChanged -= handler;
+                handler = null;
             }
         }
 
@@ -419,7 +477,7 @@ namespace Avalonia.Diagnostics.ViewModels
             DevToolsViewKind.VisualTree => 2,
             DevToolsViewKind.Events => 3,
             DevToolsViewKind.Metrics => 4,
-            _ => 1,
+            _ => 0,
         };
     }
 }

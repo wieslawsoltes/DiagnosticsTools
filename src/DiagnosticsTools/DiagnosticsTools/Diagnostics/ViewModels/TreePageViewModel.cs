@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 namespace Avalonia.Diagnostics.ViewModels
@@ -10,12 +12,18 @@ namespace Avalonia.Diagnostics.ViewModels
     {
         private TreeNode? _selectedNode;
         private ControlDetailsViewModel? _details;
+        private TreeNode[] _nodes;
+        private readonly TreeNode[] _rootNodes;
+        private TreeNode? _scopedRoot;
+        private string? _scopedNodeKey;
+        private bool _isScoped;
         private readonly ISet<string> _pinnedProperties;
 
         public TreePageViewModel(MainViewModel mainView, TreeNode[] nodes, ISet<string> pinnedProperties)
         {
             MainView = mainView;
-            Nodes = nodes;
+            _rootNodes = nodes;
+            _nodes = nodes;
             _pinnedProperties = pinnedProperties;
             PropertiesFilter = new FilterViewModel();
             PropertiesFilter.RefreshFilter += (s, e) => Details?.PropertiesView?.Refresh();
@@ -32,7 +40,23 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public FilterViewModel SettersFilter { get; }
 
-        public TreeNode[] Nodes { get; protected set; }
+        public TreeNode[] Nodes
+        {
+            get => _nodes;
+            protected set => RaiseAndSetIfChanged(ref _nodes, value);
+        }
+
+        private TreeNode? ScopedNode
+        {
+            get => _scopedRoot;
+            set => RaiseAndSetIfChanged(ref _scopedRoot, value);
+        }
+
+        public string? ScopedNodeKey
+        {
+            get => _scopedNodeKey;
+            private set => RaiseAndSetIfChanged(ref _scopedNodeKey, value);
+        }
 
         public TreeNode? SelectedNode
         {
@@ -46,6 +70,7 @@ namespace Avalonia.Diagnostics.ViewModels
                         null;
                     Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
                     Details?.UpdateStyleFilters();
+                    RaisePropertyChanged(nameof(CanScopeToSubTree));
                 }
             }
         }
@@ -106,8 +131,9 @@ namespace Avalonia.Diagnostics.ViewModels
 
             if (node != null)
             {
-                SelectedNode = node;
                 ExpandNode(node.Parent);
+                // Use dispatcher to allow the tree to expand and render before selecting
+                Dispatcher.UIThread.Post(() => SelectedNode = node, DispatcherPriority.Loaded);
             }
         }
 
@@ -199,6 +225,66 @@ namespace Avalonia.Diagnostics.ViewModels
             (SelectedNode?.Visual as Control)?.Focus();
         }
 
+        public bool CanScopeToSubTree => !IsScoped && SelectedNode != null;
+
+        public bool CanShowFullTree => IsScoped;
+
+        public bool IsScoped
+        {
+            get => _isScoped;
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _isScoped, value))
+                {
+                    RaisePropertyChanged(nameof(CanScopeToSubTree));
+                    RaisePropertyChanged(nameof(CanShowFullTree));
+                }
+            }
+        }
+
+        public void ScopeToSubTree()
+        {
+            if (!CanScopeToSubTree)
+            {
+                return;
+            }
+
+            var selected = SelectedNode!;
+            Nodes = new[] { selected };
+            ScopedNode = selected;
+            ScopedNodeKey = BuildNodeKey(selected);
+            IsScoped = true;
+        }
+
+        public void ShowFullTree()
+        {
+            if (!CanShowFullTree)
+            {
+                return;
+            }
+
+            Nodes = _rootNodes;
+            ScopedNode = null;
+            ScopedNodeKey = null;
+            IsScoped = false;
+        }
+
+        public void ExpandAll()
+        {
+            foreach (var node in Nodes)
+            {
+                SetExpandedRecursive(node, true);
+            }
+        }
+
+        public void CollapseAll()
+        {
+            foreach (var node in Nodes)
+            {
+                SetExpandedRecursive(node, false);
+            }
+        }
+
         private static string GetVisualSelector(Visual visual)
         {
             var name = string.IsNullOrEmpty(visual.Name) ? "" : $"#{visual.Name}";
@@ -217,6 +303,144 @@ namespace Avalonia.Diagnostics.ViewModels
                 node.IsExpanded = true;
                 ExpandNode(node.Parent);
             }
+        }
+
+        private static void SetExpandedRecursive(TreeNode node, bool isExpanded)
+        {
+            var stack = new Stack<TreeNode>();
+            stack.Push(node);
+
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                current.IsExpanded = isExpanded;
+
+                foreach (var child in current.Children)
+                {
+                    stack.Push(child);
+                }
+            }
+        }
+
+        internal void RestoreScope(TreeNode? scoped)
+        {
+            if (scoped is null)
+            {
+                ShowFullTree();
+                return;
+            }
+
+            ScopedNode = scoped;
+            Nodes = new[] { scoped };
+            ScopedNodeKey = BuildNodeKey(scoped);
+            IsScoped = true;
+        }
+
+        internal void RestoreScopeFromKey(string? key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                ShowFullTree();
+                return;
+            }
+
+            var node = FindNodeByKey(key!);
+            if (node is null)
+            {
+                ShowFullTree();
+                return;
+            }
+
+            ScopedNode = node;
+            Nodes = new[] { node };
+            ScopedNodeKey = key;
+            IsScoped = true;
+        }
+
+        private string BuildNodeKey(TreeNode node)
+        {
+            var segments = new Stack<int>();
+            var current = node;
+
+            while (current.Parent is { } parent)
+            {
+                var childIndex = GetChildIndex(parent, current);
+                if (childIndex < 0)
+                {
+                    return string.Empty;
+                }
+
+                segments.Push(childIndex);
+                current = parent;
+            }
+
+            var rootIndex = Array.IndexOf(_rootNodes, current);
+            if (rootIndex < 0)
+            {
+                return string.Empty;
+            }
+
+            segments.Push(rootIndex);
+            return string.Join(".", segments.Select(x => x.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        private static int GetChildIndex(TreeNode parent, TreeNode node)
+        {
+            for (var i = 0; i < parent.Children.Count; i++)
+            {
+                if (ReferenceEquals(parent.Children[i], node))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private TreeNode? FindNodeByKey(string key)
+        {
+            var parts = key.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                return null;
+            }
+
+            TreeNode? current = null;
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (!int.TryParse(parts[i], out var index))
+                {
+                    return null;
+                }
+
+                if (i == 0)
+                {
+                    if (index < 0 || index >= _rootNodes.Length)
+                    {
+                        return null;
+                    }
+
+                    current = _rootNodes[index];
+                }
+                else
+                {
+                    if (current is null)
+                    {
+                        return null;
+                    }
+
+                    var children = current.Children;
+                    if (index < 0 || index >= children.Count)
+                    {
+                        return null;
+                    }
+
+                    current = children[index];
+                }
+            }
+
+            return current;
         }
 
         private TreeNode? FindNode(TreeNode node, Control control)

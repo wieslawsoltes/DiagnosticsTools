@@ -10,10 +10,14 @@
     <Setter Property="Template">
       <ControlTemplate>
         <Grid>
-          <Button Theme="{StaticResource SimpleTextBoxClearButtonTheme}"
-                  x:Name="PART_ClearButton"
+          <Button x:Name="PART_ClearButton"
                   HorizontalAlignment="Right"
-                  VerticalContentAlignment="Center"/>
+                  VerticalContentAlignment="Center"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Padding="4">
+            <PathIcon Data="M 11.416016,10 20,1.4160156 18.583984,0 10,8.5839846 1.4160156,0 0,1.4160156 8.5839844,10 0,18.583985 1.4160156,20 10,11.416015 18.583984,20 20,18.583985 Z" Height="10" Width="10"/>
+          </Button>
         </Grid>
       </ControlTemplate>
     </Setter>

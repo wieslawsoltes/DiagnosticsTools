@@ -13,7 +13,7 @@ namespace Avalonia.Diagnostics.ViewModels
             : base(new AvaloniaObject(), owner, "/template/")
         {
             _children = new TemplateGroupChildren(this);
-            Children = _children;
+            Children = RegisterChildren(_children);
             IsExpanded = true;
         }
 

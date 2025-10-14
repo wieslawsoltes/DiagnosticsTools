@@ -16,12 +16,12 @@ namespace Avalonia.Diagnostics.ViewModels
         public VisualTreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customName = null)
             : base(avaloniaObject, parent, customName)
         {
-            Children = avaloniaObject switch
+            Children = RegisterChildren(avaloniaObject switch
             {
                 Visual visual => new VisualTreeNodeCollection(this, visual),
                 Controls.Application host => new ApplicationHostVisuals(this, host),
                 _ => TreeNodeCollection.Empty
-            };
+            });
 
             if (Visual is StyledElement styleable)
                 IsInTemplate = styleable.TemplatedParent != null;

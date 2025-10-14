@@ -17,12 +17,13 @@
         <StackPanel Orientation="Horizontal" Spacing="1">
           <Button Margin="0,0,2,0"
                   Classes="textBoxClearButton"
-                  Theme="{StaticResource SimpleTextBoxClearButtonTheme}"
                   Focusable="False"
                   ToolTip.Tip="Clear"
                   Cursor="Hand"
                   Command="{Binding $parent[TextBox].Clear}"
-                  Opacity="0.5" />
+                  Opacity="0.5">
+            <PathIcon Data="M 11.416016,10 20,1.4160156 18.583984,0 10,8.5839846 1.4160156,0 0,1.4160156 8.5839844,10 0,18.583985 1.4160156,20 10,11.416015 18.583984,20 20,18.583985 Z" Height="10" Width="10"/>
+          </Button>
           <ToggleButton Classes="filter-text-box-toggle"
                         ToolTip.Tip="Match Case"
                         IsChecked="{Binding $parent[controls:FilterTextBox].UseCaseSensitiveFilter}">
@@ -69,9 +70,16 @@
 
   <Style Selector="TextBox.filter-text-box Button.textBoxClearButton">
     <Setter Property="IsVisible" Value="False" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
   <Style Selector="TextBox.filter-text-box[AcceptsReturn=False][IsReadOnly=False]:focus:not(TextBox:empty) Button.textBoxClearButton">
     <Setter Property="IsVisible" Value="True" />
+  </Style>
+  <Style Selector="TextBox.filter-text-box Button.textBoxClearButton:pointerover">
+    <Setter Property="Opacity" Value="0.7" />
   </Style>
 
   <Style Selector="ToggleButton.filter-text-box-toggle > Image">

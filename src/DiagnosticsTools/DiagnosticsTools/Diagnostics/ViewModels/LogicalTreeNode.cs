@@ -13,12 +13,12 @@ namespace Avalonia.Diagnostics.ViewModels
         public LogicalTreeNode(AvaloniaObject avaloniaObject, TreeNode? parent)
             : base(avaloniaObject, parent)
         {
-            Children =  avaloniaObject switch
+            Children = RegisterChildren(avaloniaObject switch
             {
                 ILogical logical => new LogicalTreeNodeCollection(this, logical),
                 Controls.TopLevelGroup host => new TopLevelGroupHostLogical(this, host),
                 _ => TreeNodeCollection.Empty
-            };
+            });
         }
 
         public override TreeNodeCollection Children { get; }

@@ -11,7 +11,7 @@ using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
-using Avalonia.Themes.Simple;
+using Avalonia.Themes.Fluent;
 using Avalonia.VisualTree;
 using Avalonia.Reactive;
 
@@ -29,7 +29,7 @@ namespace Avalonia.Diagnostics.Views
         {
             InitializeComponent();
 
-            // Apply the SimpleTheme.Window theme; this must be done after the XAML is parsed as
+            // Apply the FluentTheme.Window theme; this must be done after the XAML is parsed as
             // the theme is included in the MainWindow's XAML.
             if (Theme is null && this.FindResource(typeof(Window)) is ControlTheme windowTheme)
                 Theme = windowTheme;

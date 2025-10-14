@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
@@ -8,14 +9,14 @@ namespace Avalonia.Diagnostics.Views
 {
     public partial class CombinedTreePageView : UserControl
     {
-        private TreeViewItem? _hovered;
-        private TreeView _tree = default!;
+    private VirtualizedTreeViewItem? _hovered;
+    private VirtualizedTreeView _tree = default!;
         private System.IDisposable? _adorner;
 
         public CombinedTreePageView()
         {
             InitializeComponent();
-            _tree = this.GetControl<TreeView>("tree");
+            _tree = this.GetControl<VirtualizedTreeView>("tree");
         }
 
         protected void UpdateAdorner(object? sender, PointerEventArgs e)
@@ -25,7 +26,7 @@ namespace Avalonia.Diagnostics.Views
                 return;
             }
 
-            var item = source.FindLogicalAncestorOfType<TreeViewItem>();
+            var item = source.FindLogicalAncestorOfType<VirtualizedTreeViewItem>();
             if (item == _hovered)
             {
                 return;
@@ -33,7 +34,7 @@ namespace Avalonia.Diagnostics.Views
 
             _adorner?.Dispose();
 
-            if (item is null || item.TreeViewOwner != _tree)
+            if (item is null || item.FindLogicalAncestorOfType<VirtualizedTreeView>() != _tree)
             {
                 _hovered = null;
                 return;
@@ -41,7 +42,8 @@ namespace Avalonia.Diagnostics.Views
 
             _hovered = item;
 
-            var visual = (item.DataContext as TreeNode)?.Visual as Visual;
+            var node = (item.DataContext as FlatTreeNode)?.Node as TreeNode;
+            var visual = node?.Visual as Visual;
             var shouldVisualizeMarginPadding = (DataContext as TreePageViewModel)?.MainView.ShouldVisualizeMarginPadding;
             if (visual is null || shouldVisualizeMarginPadding is null)
             {

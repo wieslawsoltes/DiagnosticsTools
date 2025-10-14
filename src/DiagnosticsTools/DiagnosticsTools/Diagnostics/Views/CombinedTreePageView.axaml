@@ -1,67 +1,73 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.CombinedTreePageView"
              x:DataType="vm:CombinedTreePageViewModel">
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="vm:CombinedTreeTemplateGroupNode">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="{Binding Type}"
+                   FontStyle="Italic"
+                   Foreground="{DynamicResource ThemeForegroundLowBrush}" />
+      </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="vm:CombinedTreeNode">
+      <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}">
+        <StackPanel.Styles>
+          <Style Selector="StackPanel[Tag=Template]">
+            <Setter Property="Opacity" Value="0.75" />
+          </Style>
+          <Style Selector="StackPanel[Tag=Template] TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
+          </Style>
+        </StackPanel.Styles>
+        <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
+        <TextBlock Text="{Binding Classes}"/>
+        <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
+        <TextBlock Foreground="{DynamicResource ThemeForegroundLowBrush}" Text="{Binding RoleLabel}"/>
+        <TextBlock Foreground="{DynamicResource ThemeForegroundLowBrush}" Text="{Binding TemplateDisplay}"/>
+      </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="vm:TreeNode">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <StackPanel.Styles>
+          <Style Selector="StackPanel[Tag=True]">
+            <Setter Property="Opacity" Value="0.5"/>
+          </Style>
+        </StackPanel.Styles>
+        <StackPanel.Tag>
+          <Binding Path="IsInTemplate" FallbackValue="False"/>
+        </StackPanel.Tag>
+        <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
+        <TextBlock Text="{Binding Classes}"/>
+        <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
+      </StackPanel>
+    </DataTemplate>
+  </UserControl.DataTemplates>
   <Grid ColumnDefinitions="0.35*,4,0.65*">
-    <TreeView Name="tree"
+    <virtualizedTreeView:VirtualizedTreeView Name="tree"
               BorderThickness="0"
               ItemsSource="{Binding Nodes}"
               SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
               PointerMoved="UpdateAdorner"
               PointerExited="RemoveAdorner">
-      <TreeView.DataTemplates>
-        <TreeDataTemplate DataType="vm:CombinedTreeTemplateGroupNode"
-                          ItemsSource="{Binding Children}">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{Binding Type}"
-                       FontStyle="Italic"
-                       Foreground="{DynamicResource ThemeForegroundLowBrush}" />
-          </StackPanel>
-        </TreeDataTemplate>
-        <TreeDataTemplate DataType="vm:CombinedTreeNode"
-                          ItemsSource="{Binding Children}">
-          <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}">
-            <StackPanel.Styles>
-              <Style Selector="StackPanel[Tag=Template]">
-                <Setter Property="Opacity" Value="0.75" />
-              </Style>
-              <Style Selector="StackPanel[Tag=Template] TextBlock">
-                <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
-              </Style>
-            </StackPanel.Styles>
-            <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
-            <TextBlock Text="{Binding Classes}"/>
-            <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
-            <TextBlock Foreground="{DynamicResource ThemeForegroundLowBrush}" Text="{Binding RoleLabel}"/>
-            <TextBlock Foreground="{DynamicResource ThemeForegroundLowBrush}" Text="{Binding TemplateDisplay}"/>
-          </StackPanel>
-        </TreeDataTemplate>
-        <TreeDataTemplate DataType="vm:TreeNode"
-                          ItemsSource="{Binding Children}">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
-            <TextBlock Text="{Binding Classes}"/>
-            <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
-          </StackPanel>
-        </TreeDataTemplate>
-      </TreeView.DataTemplates>
-      <TreeView.Styles>
-        <Style Selector="TreeViewItem" x:DataType="vm:TreeNode">
-          <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
-          <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="TreeViewItem" x:DataType="vm:CombinedTreeNode">
-          <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
-          <Setter Property="Background" Value="Transparent" />
-        </Style>
-      </TreeView.Styles>
-      <TreeView.ContextFlyout>
+      <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
         <MenuFlyout>
           <MenuItem Header="Copy">
             <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
             <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
           </MenuItem>
+          <MenuItem Header="-" />
+          <MenuItem Header="Scope to this subtree"
+                    Command="{Binding ScopeToSubTree}"
+                    IsEnabled="{Binding CanScopeToSubTree}" />
+          <MenuItem Header="Show full tree"
+                    Command="{Binding ShowFullTree}"
+                    IsEnabled="{Binding CanShowFullTree}" />
+          <MenuItem Header="-" />
+          <MenuItem Header="Expand all" Command="{Binding ExpandAll}" />
+          <MenuItem Header="Collapse all" Command="{Binding CollapseAll}" />
           <MenuItem Header="-" />
           <MenuItem Header="Expand recursively" Command="{Binding ExpandRecursively}" />
           <MenuItem Header="Collapse children" Command="{Binding CollapseChildren}" />
@@ -69,8 +75,8 @@
           <MenuItem Header="Bring into view" Command="{Binding BringIntoView}" />
           <MenuItem Header="Focus" Command="{Binding Focus}" />
         </MenuFlyout>
-      </TreeView.ContextFlyout>
-    </TreeView>
+      </virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+    </virtualizedTreeView:VirtualizedTreeView>
 
     <GridSplitter Background="{DynamicResource ThemeControlMidBrush}" Width="1" Grid.Column="1"/>
     <ContentControl Content="{Binding Details}" Grid.Column="2"/>

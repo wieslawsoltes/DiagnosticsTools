@@ -105,8 +105,8 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
-          <DataGridTemplateColumn Header="Value" Width="100">
-              <DataTemplate>
+          <DataGridTemplateColumn Header="Value" Width="100" x:DataType="vm:PropertyViewModel">
+              <DataTemplate DataType="vm:PropertyViewModel">
                 <local:PropertyValueEditorView />
               </DataTemplate>
           </DataGridTemplateColumn>
