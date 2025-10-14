@@ -37,6 +37,31 @@ Console.WriteLine("Sequence points referencing XAML:");
 foreach (var methodHandle in reader.MethodDebugInformation)
 {
 	var method = reader.GetMethodDebugInformation(methodHandle);
+	var definitionHandle = methodHandle.ToDefinitionHandle();
+	if (definitionHandle.IsNil)
+	{
+		continue;
+	}
+
+	MethodDefinition methodDefinition;
+	try
+	{
+		methodDefinition = reader.GetMethodDefinition(definitionHandle);
+	}
+	catch (BadImageFormatException)
+	{
+		continue;
+	}
+
+	string methodName;
+	try
+	{
+		methodName = reader.GetString(methodDefinition.Name);
+	}
+	catch (BadImageFormatException)
+	{
+		continue;
+	}
 
 	foreach (var sequencePoint in method.GetSequencePoints())
 	{
@@ -59,6 +84,6 @@ foreach (var methodHandle in reader.MethodDebugInformation)
 			continue;
 		}
 
-		Console.WriteLine($"  {name} : {sequencePoint.StartLine},{sequencePoint.StartColumn} -> {sequencePoint.EndLine},{sequencePoint.EndColumn}");
+		Console.WriteLine($"  {methodName} -> {name} : {sequencePoint.StartLine},{sequencePoint.StartColumn} -> {sequencePoint.EndLine},{sequencePoint.EndColumn}");
 	}
 }
