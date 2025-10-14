@@ -14,11 +14,9 @@ The original code can be found in the main Avalonia repository:
 
 ## License
 
-This project inherits the MIT License from the original Avalonia project.
+This project is distributed under the MIT License. See [LICENSE.TXT](./LICENSE.TXT) for details.
 
-See [AVALONIA-LICENSE.md](./AVALONIA-LICENSE.md) for the full Avalonia license text.
-
-Copyright (c) AvaloniaUI OÜ
+Portions of the code were ported from the Avalonia Diagnostics tooling in the AvaloniaUI/Avalonia repository.
 
 ## Features
 
