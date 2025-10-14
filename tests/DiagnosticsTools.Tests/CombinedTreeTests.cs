@@ -35,9 +35,8 @@ namespace DiagnosticsTools.Tests
             Dispatcher.UIThread.RunJobs();
 
             var root = CombinedTreeNode.Create(control).Single();
-            var templateNodes = root.Children.OfType<CombinedTreeNode>()
-                .Where(node => node.Role == CombinedTreeNode.CombinedNodeRole.Template)
-                .ToList();
+            var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
+            var templateNodes = templateGroup.Children.OfType<CombinedTreeNode>().ToList();
 
             Assert.Contains(templateNodes, node => node.TemplateName == "PART_Content" && ReferenceEquals(node.TemplateOwner, control));
         }
@@ -57,14 +56,16 @@ namespace DiagnosticsTools.Tests
 
             var root = CombinedTreeNode.Create(outer).Single();
 
-            var innerNode = root.Children.OfType<CombinedTreeNode>()
+            var outerTemplateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
+            var innerNode = outerTemplateGroup.Children.OfType<CombinedTreeNode>()
                 .First(node => ReferenceEquals(node.Visual, inner));
 
-            var nestedTemplateNode = innerNode.Children.OfType<CombinedTreeNode>()
-                .FirstOrDefault(node => node.Role == CombinedTreeNode.CombinedNodeRole.Template);
+            var innerTemplateGroup = Assert.Single(innerNode.Children.OfType<CombinedTreeTemplateGroupNode>());
+            var nestedTemplateNode = innerTemplateGroup.Children.OfType<CombinedTreeNode>()
+                .FirstOrDefault(node => node.TemplateName == "PART_NestedContent");
 
             Assert.NotNull(nestedTemplateNode);
-            Assert.Equal("/template/", nestedTemplateNode!.RoleLabel);
+            Assert.Equal("/template/", innerTemplateGroup.Type);
         }
 
         [AvaloniaFact]
@@ -79,7 +80,8 @@ namespace DiagnosticsTools.Tests
             var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned);
 
             var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
-            var templateNode = root.Children.OfType<CombinedTreeNode>()
+            var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
+            var templateNode = templateGroup.Children.OfType<CombinedTreeNode>()
                 .First(node => node.Role == CombinedTreeNode.CombinedNodeRole.Template);
 
             combinedTree.SelectControl((Control)templateNode.Visual);

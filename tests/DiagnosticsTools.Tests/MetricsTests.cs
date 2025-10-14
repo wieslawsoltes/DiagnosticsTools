@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -27,6 +28,64 @@ namespace DiagnosticsTools.Tests
             var metric = Assert.Single(viewModel.Histograms);
             Assert.True(metric.IsCritical);
             Assert.True(metric.IsWarning);
+        }
+
+        [AvaloniaFact]
+        public async Task MetricsListenerService_ignores_non_prefixed_instruments()
+        {
+            using var listener = new MetricsListenerService(histogramCapacity: 4);
+            using var avaloniaMeter = new Meter("Avalonia.Diagnostics.Tests", "1.0");
+            using var otherMeter = new Meter("Other.Diagnostics.Tests", "1.0");
+            var avaloniaHistogram = avaloniaMeter.CreateHistogram<double>("avalonia.ui.measure.time");
+            var otherHistogram = otherMeter.CreateHistogram<double>("other.render.time");
+
+            avaloniaHistogram.Record(10);
+            otherHistogram.Record(20);
+            await PumpDispatcherAsync();
+
+            Assert.Contains(listener.HistogramSnapshots, stats => stats.Name == "avalonia.ui.measure.time");
+            Assert.DoesNotContain(listener.HistogramSnapshots, stats => stats.Name == "other.render.time");
+        }
+
+        [AvaloniaFact]
+        public async Task MetricsListenerService_limits_histogram_capacity()
+        {
+            using var listener = new MetricsListenerService(histogramCapacity: 3);
+            using var meter = new Meter("Avalonia.Diagnostics.Tests", "1.0");
+            var histogram = meter.CreateHistogram<double>("avalonia.ui.arrange.time");
+
+            for (var i = 1; i <= 5; i++)
+            {
+                histogram.Record(i);
+            }
+
+            await PumpDispatcherAsync();
+
+            var stats = Assert.Single(listener.HistogramSnapshots);
+            Assert.Equal(new[] { 3d, 4d, 5d }, stats.Snapshot);
+            Assert.Equal(3d, stats.Minimum);
+            Assert.Equal(5d, stats.Maximum);
+            Assert.Equal(4d, stats.Average);
+            Assert.Equal(5d, stats.Percentile95);
+        }
+
+        [AvaloniaFact]
+        public async Task MetricsListenerService_captures_prefixed_activities()
+        {
+            using var listener = new MetricsListenerService(activityCapacity: 4);
+            using var source = new ActivitySource("Avalonia.Diagnostics.Tests.Activities");
+
+            using (var activity = source.StartActivity("Avalonia.PerformingHitTest"))
+            {
+                Assert.NotNull(activity);
+                await Task.Delay(1);
+                activity!.Stop();
+            }
+
+            await PumpDispatcherAsync();
+
+            Assert.True(listener.ActivitySnapshots.TryGetValue("Avalonia.PerformingHitTest", out var samples));
+            Assert.NotEmpty(samples);
         }
 
         [AvaloniaFact]
