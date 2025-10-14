@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.CombinedTreePageView"
              x:DataType="vm:CombinedTreePageViewModel">
@@ -46,37 +47,48 @@
     </DataTemplate>
   </UserControl.DataTemplates>
   <Grid ColumnDefinitions="0.35*,4,0.65*">
-    <virtualizedTreeView:VirtualizedTreeView Name="tree"
-              BorderThickness="0"
-              ItemsSource="{Binding Nodes}"
-              SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
-              PointerMoved="UpdateAdorner"
-              PointerExited="RemoveAdorner">
-      <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
-        <MenuFlyout>
-          <MenuItem Header="Copy">
-            <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
-            <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
-          </MenuItem>
-          <MenuItem Header="-" />
-          <MenuItem Header="Scope to this subtree"
-                    Command="{Binding ScopeToSubTree}"
-                    IsEnabled="{Binding CanScopeToSubTree}" />
-          <MenuItem Header="Show full tree"
-                    Command="{Binding ShowFullTree}"
-                    IsEnabled="{Binding CanShowFullTree}" />
-          <MenuItem Header="-" />
-          <MenuItem Header="Expand all" Command="{Binding ExpandAll}" />
-          <MenuItem Header="Collapse all" Command="{Binding CollapseAll}" />
-          <MenuItem Header="-" />
-          <MenuItem Header="Expand recursively" Command="{Binding ExpandRecursively}" />
-          <MenuItem Header="Collapse children" Command="{Binding CollapseChildren}" />
-          <MenuItem Header="Capture node screenshot" Command="{Binding CaptureNodeScreenshot}" />
-          <MenuItem Header="Bring into view" Command="{Binding BringIntoView}" />
-          <MenuItem Header="Focus" Command="{Binding Focus}" />
-        </MenuFlyout>
-      </virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
-    </virtualizedTreeView:VirtualizedTreeView>
+    <Grid RowDefinitions="Auto,*">
+      <controls:FilterTextBox Grid.Row="0"
+                              Margin="0,0,0,4"
+                              DataContext="{Binding TreeFilter}"
+                              Text="{Binding FilterString}"
+                              Watermark="Search tree"
+                              UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
+                              UseWholeWordFilter="{Binding UseWholeWordFilter}"
+                              UseRegexFilter="{Binding UseRegexFilter}" />
+
+      <virtualizedTreeView:VirtualizedTreeView Grid.Row="1" Name="tree"
+                                               BorderThickness="0"
+                                               ItemsSource="{Binding Nodes}"
+                                               SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
+                                               PointerMoved="UpdateAdorner"
+                                               PointerExited="RemoveAdorner">
+        <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+          <MenuFlyout>
+            <MenuItem Header="Copy">
+              <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
+              <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
+            </MenuItem>
+            <MenuItem Header="-" />
+            <MenuItem Header="Scope to this subtree"
+                      Command="{Binding ScopeToSubTree}"
+                      IsEnabled="{Binding CanScopeToSubTree}" />
+            <MenuItem Header="Show full tree"
+                      Command="{Binding ShowFullTree}"
+                      IsEnabled="{Binding CanShowFullTree}" />
+            <MenuItem Header="-" />
+            <MenuItem Header="Expand all" Command="{Binding ExpandAll}" />
+            <MenuItem Header="Collapse all" Command="{Binding CollapseAll}" />
+            <MenuItem Header="-" />
+            <MenuItem Header="Expand recursively" Command="{Binding ExpandRecursively}" />
+            <MenuItem Header="Collapse children" Command="{Binding CollapseChildren}" />
+            <MenuItem Header="Capture node screenshot" Command="{Binding CaptureNodeScreenshot}" />
+            <MenuItem Header="Bring into view" Command="{Binding BringIntoView}" />
+            <MenuItem Header="Focus" Command="{Binding Focus}" />
+          </MenuFlyout>
+        </virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+      </virtualizedTreeView:VirtualizedTreeView>
+    </Grid>
 
     <GridSplitter Background="{DynamicResource ThemeControlMidBrush}" Width="1" Grid.Column="1"/>
     <ContentControl Content="{Binding Details}" Grid.Column="2"/>

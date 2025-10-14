@@ -1,16 +1,28 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.TreePageView"
              x:DataType="vm:TreePageViewModel">
   <Grid ColumnDefinitions="0.35*,4,0.65*">
-    <virtualizedTreeView:VirtualizedTreeView Name="tree"
-              BorderThickness="0"
-              ItemsSource="{Binding Nodes}"
-              SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
-              PointerMoved="UpdateAdorner"
-              PointerExited="RemoveAdorner">
+    <Grid RowDefinitions="Auto,*">
+      <controls:FilterTextBox Grid.Row="0"
+                              Margin="0,0,0,4"
+                              DataContext="{Binding TreeFilter}"
+                              Text="{Binding FilterString}"
+                              Watermark="Search tree"
+                              UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
+                              UseWholeWordFilter="{Binding UseWholeWordFilter}"
+                              UseRegexFilter="{Binding UseRegexFilter}" />
+
+  <virtualizedTreeView:VirtualizedTreeView Grid.Row="1"
+                   Name="tree"
+                   BorderThickness="0"
+                   ItemsSource="{Binding Nodes}"
+                   SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
+                   PointerMoved="UpdateAdorner"
+                   PointerExited="RemoveAdorner">
       <virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
         <DataTemplate>
           <StackPanel Orientation="Horizontal" Spacing="8">
@@ -52,7 +64,8 @@
           <MenuItem Header="Focus" Command="{Binding Focus}" />
         </MenuFlyout>
       </virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
-    </virtualizedTreeView:VirtualizedTreeView>
+      </virtualizedTreeView:VirtualizedTreeView>
+    </Grid>
 
     <GridSplitter Background="{DynamicResource ThemeControlMidBrush}" Width="1" Grid.Column="1"/>
     <ContentControl Content="{Binding Details}" Grid.Column="2"/>

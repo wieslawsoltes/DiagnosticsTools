@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Diagnostics;
@@ -79,6 +80,15 @@ namespace Avalonia.Diagnostics.ViewModels
         }
 
         public override TreeNodeCollection Children { get; }
+
+        public override string SearchText => string.Join(" ", new[]
+        {
+            base.SearchText,
+            TemplateName,
+            TemplateDisplay,
+            RoleLabel,
+        }.Where(x => !string.IsNullOrWhiteSpace(x))
+         .Select(x => x!.Trim()));
 
         public bool IsTemplatePart => Role == CombinedNodeRole.Template;
 

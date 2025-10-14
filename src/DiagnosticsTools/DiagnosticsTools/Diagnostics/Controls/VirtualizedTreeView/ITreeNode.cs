@@ -9,4 +9,5 @@ internal interface ITreeNode : INotifyPropertyChanged, INotifyCollectionChanged
     bool IsExpanded { get; set; }
     bool HasChildren { get; }
     IReadOnlyList<ITreeNode> Children { get; }
+    bool IsVisible { get; }
 }

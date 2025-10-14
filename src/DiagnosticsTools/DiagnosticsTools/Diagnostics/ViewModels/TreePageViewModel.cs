@@ -30,6 +30,9 @@ namespace Avalonia.Diagnostics.ViewModels
 
             SettersFilter = new FilterViewModel();
             SettersFilter.RefreshFilter += (s, e) => Details?.UpdateStyleFilters();
+
+            TreeFilter = new FilterViewModel();
+            TreeFilter.RefreshFilter += (s, e) => ApplyTreeFilter();
         }
 
         public event EventHandler<string>? ClipboardCopyRequested;
@@ -39,6 +42,8 @@ namespace Avalonia.Diagnostics.ViewModels
         public FilterViewModel PropertiesFilter { get; }
 
         public FilterViewModel SettersFilter { get; }
+
+        public FilterViewModel TreeFilter { get; }
 
         public TreeNode[] Nodes
         {
@@ -254,6 +259,7 @@ namespace Avalonia.Diagnostics.ViewModels
             ScopedNode = selected;
             ScopedNodeKey = BuildNodeKey(selected);
             IsScoped = true;
+            ApplyTreeFilter();
         }
 
         public void ShowFullTree()
@@ -267,6 +273,7 @@ namespace Avalonia.Diagnostics.ViewModels
             ScopedNode = null;
             ScopedNodeKey = null;
             IsScoped = false;
+            ApplyTreeFilter();
         }
 
         public void ExpandAll()
@@ -334,6 +341,7 @@ namespace Avalonia.Diagnostics.ViewModels
             Nodes = new[] { scoped };
             ScopedNodeKey = BuildNodeKey(scoped);
             IsScoped = true;
+            ApplyTreeFilter();
         }
 
         internal void RestoreScopeFromKey(string? key)
@@ -355,6 +363,7 @@ namespace Avalonia.Diagnostics.ViewModels
             Nodes = new[] { node };
             ScopedNodeKey = key;
             IsScoped = true;
+            ApplyTreeFilter();
         }
 
         private string BuildNodeKey(TreeNode node)
@@ -468,6 +477,94 @@ namespace Avalonia.Diagnostics.ViewModels
         internal void UpdatePropertiesView()
         {
             Details?.UpdatePropertiesView(MainView?.ShowImplementedInterfaces ?? true);
+        }
+
+        private void ApplyTreeFilter()
+        {
+            var hasFilter = !string.IsNullOrWhiteSpace(TreeFilter.FilterString);
+
+            if (ScopedNode is { } scoped)
+            {
+                if (hasFilter)
+                {
+                    FilterNode(scoped, ancestorMatch: false);
+                }
+                else
+                {
+                    ResetVisibility(scoped);
+                }
+            }
+            else
+            {
+                foreach (var root in _rootNodes)
+                {
+                    if (hasFilter)
+                    {
+                        FilterNode(root, ancestorMatch: false);
+                    }
+                    else
+                    {
+                        ResetVisibility(root);
+                    }
+                }
+            }
+
+            if (hasFilter && SelectedNode is { } selected && !selected.IsVisible)
+            {
+                SelectedNode = null;
+            }
+
+            RefreshNodesSource();
+
+            bool FilterNode(TreeNode node, bool ancestorMatch)
+            {
+                var matches = TreeFilter.Filter(node.SearchText);
+                var forceVisible = ancestorMatch || matches;
+                var hasVisibleChild = false;
+
+                foreach (var child in node.Children)
+                {
+                    hasVisibleChild |= FilterNode(child, forceVisible);
+                }
+
+                var isVisible = matches || hasVisibleChild || ancestorMatch;
+                node.IsVisible = hasFilter ? isVisible : true;
+
+                if (hasFilter && (forceVisible || hasVisibleChild) && node.HasChildren)
+                {
+                    node.IsExpanded = true;
+                }
+
+                return isVisible;
+            }
+
+            void ResetVisibility(TreeNode node)
+            {
+                node.IsVisible = true;
+                foreach (var child in node.Children)
+                {
+                    ResetVisibility(child);
+                }
+            }
+        }
+
+        private void RefreshNodesSource()
+        {
+            if (IsScoped && ScopedNode is { } scoped)
+            {
+                Nodes = new[] { scoped };
+                return;
+            }
+
+            if (_rootNodes.Length == 0)
+            {
+                Nodes = Array.Empty<TreeNode>();
+                return;
+            }
+
+            var copy = new TreeNode[_rootNodes.Length];
+            Array.Copy(_rootNodes, copy, _rootNodes.Length);
+            Nodes = copy;
         }
     }
 }

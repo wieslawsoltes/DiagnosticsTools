@@ -20,6 +20,7 @@ public class VirtualizedTreeViewTests
         public bool IsExpanded { get; set; }
         public bool HasChildren => Children.Count > 0;
         public IReadOnlyList<ITreeNode> Children { get; }
+        public bool IsVisible { get; set; } = true;
 
         public event PropertyChangedEventHandler? PropertyChanged;
         public event NotifyCollectionChangedEventHandler? CollectionChanged;

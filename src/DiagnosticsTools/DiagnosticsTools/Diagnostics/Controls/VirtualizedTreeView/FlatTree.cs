@@ -66,10 +66,15 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
     private int InsertNode(ITreeNode node, int level, int startIndex)
     {
         int index = startIndex;
+        SubscribeToNode(node);
+
+        if (!node.IsVisible)
+        {
+            return 0;
+        }
+
         var flatChild = new FlatTreeNode(node, level);
         _flatTree.Insert(index++, flatChild);
-
-        SubscribeToNode(node);
 
         if (node.IsExpanded)
         {
@@ -110,6 +115,10 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
         for (var index = 0; index < end; index++)
         {
             var child = parent.Children[index];
+            if (!child.IsVisible)
+            {
+                continue;
+            }
             count++;
             if (IsExpanded(child))
                 count += CountExpandedChildren(child);
@@ -144,6 +153,10 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
         }
 
         var nodeIndex = IndexOfNode(node);
+        if (nodeIndex < 0)
+        {
+            return;
+        }
         var flatNode = _flatTree[nodeIndex];
         if (node.IsExpanded)
         {
@@ -183,6 +196,10 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
 
         var parent = (ITreeNode)sender;
         var indexOfParent = IndexOfNode(parent);
+
+        if (indexOfParent < 0)
+            return;
+
         var flatParent = _flatTree[indexOfParent];
 
         if (!IsExpanded(parent))
@@ -197,8 +214,11 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
                 index += InsertNode(flatParent.Node.Children[e.NewStartingIndex + i], flatParent.Level + 1, index);
             }
             var count = index - startIndex;
-            var newItems = _flatTree.GetRange(startIndex, count);
-            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startIndex));
+            if (count > 0)
+            {
+                var newItems = _flatTree.GetRange(startIndex, count);
+                CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startIndex));
+            }
         }
         else if (e.Action == NotifyCollectionChangedAction.Remove)
         {
@@ -206,17 +226,26 @@ internal class FlatTree : IReadOnlyList<FlatTreeNode>,
             var count = 0;
             for (int i = 0; i < e.OldItems!.Count; i++)
             {
-                if (IsExpanded(_flatTree[startIndex + count].Node))
-                    count += CountExpandedChildren(_flatTree[startIndex + count].Node);
+                if (startIndex + count >= _flatTree.Count)
+                {
+                    break;
+                }
+
+                var child = _flatTree[startIndex + count].Node;
+                if (IsExpanded(child))
+                    count += CountExpandedChildren(child);
                 count++;
             }
-            var removedItems = _flatTree.GetRange(startIndex, count);
-            foreach (var item in removedItems)
+            if (count > 0)
             {
-                UnsubscribeFromNode(item.Node);
+                var removedItems = _flatTree.GetRange(startIndex, count);
+                foreach (var item in removedItems)
+                {
+                    UnsubscribeFromNode(item.Node);
+                }
+                _flatTree.RemoveRange(startIndex, count);
+                CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removedItems, startIndex));
             }
-            _flatTree.RemoveRange(startIndex, count);
-            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removedItems, startIndex));
         }
         else
             throw new NotImplementedException();

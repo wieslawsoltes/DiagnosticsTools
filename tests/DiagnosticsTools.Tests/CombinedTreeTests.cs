@@ -85,6 +85,7 @@ namespace DiagnosticsTools.Tests
                 .First(node => node.Role == CombinedTreeNode.CombinedNodeRole.Template);
 
             combinedTree.SelectControl((Control)templateNode.Visual);
+            Dispatcher.UIThread.RunJobs();
 
             Assert.Same(templateNode, combinedTree.SelectedNode);
         }

@@ -8,6 +8,7 @@ using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Reactive;
+using System.Linq;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -16,6 +17,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly IDisposable? _classesSubscription;
         private string _classes;
         private bool _isExpanded;
+        private bool _isVisible = true;
 
         protected TreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customTypeName = null)
         {
@@ -82,6 +84,12 @@ namespace Avalonia.Diagnostics.ViewModels
             set { RaiseAndSetIfChanged(ref _isExpanded, value); }
         }
 
+        public bool IsVisible
+        {
+            get { return _isVisible; }
+            set { RaiseAndSetIfChanged(ref _isVisible, value); }
+        }
+
         public TreeNode? Parent
         {
             get;
@@ -91,6 +99,29 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             get;
             private set;
+        }
+
+        public virtual string SearchText
+        {
+            get
+            {
+                var type = Type;
+                var elementName = ElementName;
+                var classes = string.IsNullOrWhiteSpace(Classes)
+                    ? null
+                    : Classes.Trim('(', ')');
+                var visualType = Visual?.GetType();
+
+                return string.Join(" ", new[]
+                    {
+                        type,
+                        elementName,
+                        classes,
+                        visualType?.Name,
+                        visualType?.FullName,
+                    }.Where(x => !string.IsNullOrWhiteSpace(x))
+                     .Select(x => x!.Trim()));
+            }
         }
 
         public event NotifyCollectionChangedEventHandler? CollectionChanged;
