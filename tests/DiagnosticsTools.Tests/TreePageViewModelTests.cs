@@ -67,4 +67,43 @@ public class TreePageViewModelTests
         Assert.False(rootNodeAfterFilter.IsVisible);
         Assert.All(rootNodeAfterFilter.Children, n => Assert.False(n.IsVisible));
     }
+
+    [AvaloniaFact]
+    public void TreeFilter_Matches_Name_When_Name_Field_Selected()
+    {
+        var root = new StackPanel { Name = "RootPanel" };
+        var child = new Button { Name = "PART_Control" };
+        root.Children.Add(child);
+
+        using var mainViewModel = new MainViewModel(root);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+
+        treeViewModel.SelectedTreeSearchField = TreeSearchField.Name;
+        treeViewModel.TreeFilter.FilterString = "PART_Control";
+
+        var rootNode = Assert.Single(treeViewModel.Nodes);
+        Assert.True(rootNode.IsVisible);
+        var childNode = Assert.Single(rootNode.Children);
+        Assert.True(childNode.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void TreeFilter_Matches_Class_When_Classes_Field_Selected()
+    {
+        var root = new StackPanel { Name = "RootPanel" };
+        var child = new Button { Name = "ChildButton" };
+        child.Classes.Add("highlighted");
+        root.Children.Add(child);
+
+        using var mainViewModel = new MainViewModel(root);
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>());
+
+        treeViewModel.SelectedTreeSearchField = TreeSearchField.Classes;
+        treeViewModel.TreeFilter.FilterString = ".highlighted";
+
+        var rootNode = Assert.Single(treeViewModel.Nodes);
+        Assert.True(rootNode.IsVisible);
+        var childNode = Assert.Single(rootNode.Children);
+        Assert.True(childNode.IsVisible);
+    }
 }

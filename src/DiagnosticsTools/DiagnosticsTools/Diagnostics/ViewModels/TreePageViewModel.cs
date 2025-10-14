@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -18,6 +19,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private string? _scopedNodeKey;
         private bool _isScoped;
         private readonly ISet<string> _pinnedProperties;
+        private TreeSearchField _selectedTreeSearchField = TreeSearchField.TypeName;
 
         public TreePageViewModel(MainViewModel mainView, TreeNode[] nodes, ISet<string> pinnedProperties)
         {
@@ -49,6 +51,18 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             get => _nodes;
             protected set => RaiseAndSetIfChanged(ref _nodes, value);
+        }
+
+        public TreeSearchField SelectedTreeSearchField
+        {
+            get => _selectedTreeSearchField;
+            set
+            {
+                if (RaiseAndSetIfChanged(ref _selectedTreeSearchField, value))
+                {
+                    ApplyTreeFilter();
+                }
+            }
         }
 
         private TreeNode? ScopedNode
@@ -520,7 +534,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             bool FilterNode(TreeNode node, bool ancestorMatch)
             {
-                var matches = hasFilter && CanNodeMatch(node) && TreeFilter.Filter(node.SearchText);
+                var matches = hasFilter && CanNodeMatch(node) && NodeMatchesFilter(node);
                 var hasMatchInChildren = false;
 
                 foreach (var child in node.Children)
@@ -576,6 +590,81 @@ namespace Avalonia.Diagnostics.ViewModels
             var copy = new TreeNode[_rootNodes.Length];
             Array.Copy(_rootNodes, copy, _rootNodes.Length);
             Nodes = copy;
+        }
+
+        private bool NodeMatchesFilter(TreeNode node)
+        {
+            var searchText = SelectedTreeSearchField switch
+            {
+                TreeSearchField.TypeName => BuildTypeSearchText(node),
+                TreeSearchField.Classes => BuildClassesSearchText(node),
+                TreeSearchField.Name => BuildNameSearchText(node),
+                _ => node.SearchText,
+            };
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                return false;
+            }
+
+            return TreeFilter.Filter(searchText);
+        }
+
+        private static string BuildTypeSearchText(TreeNode node)
+        {
+            var visualType = node.Visual?.GetType();
+
+            return string.Join(" ", new[]
+                {
+                    node.Type,
+                    visualType?.Name,
+                    visualType?.FullName,
+                }.Where(x => !string.IsNullOrWhiteSpace(x))
+                 .Select(x => x!.Trim()));
+        }
+
+        private static string BuildClassesSearchText(TreeNode node)
+        {
+            if (node.Visual is StyledElement styled && styled.Classes.Count > 0)
+            {
+                var tokens = styled.Classes.SelectMany(cls =>
+                {
+                    if (string.IsNullOrWhiteSpace(cls))
+                    {
+                        return Array.Empty<string>();
+                    }
+
+                    if (cls.StartsWith(":", StringComparison.Ordinal))
+                    {
+                        return new[] { cls };
+                    }
+
+                    return new[] { cls, "." + cls };
+                });
+
+                var text = string.Join(" ", tokens.Where(x => !string.IsNullOrWhiteSpace(x))
+                                                   .Select(x => x.Trim()))
+                                   .Trim();
+
+                return text;
+            }
+
+            return string.Empty;
+        }
+
+        private static string BuildNameSearchText(TreeNode node)
+        {
+            if (!string.IsNullOrWhiteSpace(node.ElementName))
+            {
+                return node.ElementName!;
+            }
+
+            if (node.Visual is StyledElement styled && !string.IsNullOrWhiteSpace(styled.Name))
+            {
+                return styled.Name!;
+            }
+
+            return string.Empty;
         }
     }
 }

@@ -3,18 +3,56 @@
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
              xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
+             xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.TreePageView"
              x:DataType="vm:TreePageViewModel">
+  <UserControl.Resources>
+    <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
+  </UserControl.Resources>
   <Grid ColumnDefinitions="0.35*,4,0.65*">
     <Grid RowDefinitions="Auto,*">
-      <controls:FilterTextBox Grid.Row="0"
-                              Margin="0,0,0,4"
-                              DataContext="{Binding TreeFilter}"
-                              Text="{Binding FilterString}"
-                              Watermark="Search tree"
-                              UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
-                              UseWholeWordFilter="{Binding UseWholeWordFilter}"
-                              UseRegexFilter="{Binding UseRegexFilter}" />
+      <Grid Grid.Row="0"
+            Margin="0,0,0,4"
+            ColumnDefinitions="*,Auto"
+            ColumnSpacing="6">
+        <controls:FilterTextBox Grid.Column="0"
+                                DataContext="{Binding TreeFilter}"
+                                Text="{Binding FilterString}"
+                                Watermark="Search tree"
+                                UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
+                                UseWholeWordFilter="{Binding UseWholeWordFilter}"
+                                UseRegexFilter="{Binding UseRegexFilter}" />
+
+        <Button Grid.Column="1"
+                Width="28"
+                Height="28"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                ToolTip.Tip="Search options">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <StackPanel MinWidth="180"
+                          Margin="10"
+                          Spacing="8">
+                <TextBlock Text="Search target"
+                           FontWeight="SemiBold" />
+                <StackPanel Spacing="4">
+                  <RadioButton Content="Type name"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.TypeName}}" />
+                  <RadioButton Content="Classes"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.Classes}}" />
+                  <RadioButton Content="Name"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.Name}}" />
+                </StackPanel>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+          <TextBlock Text="⚙️"
+                     FontSize="16"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+        </Button>
+      </Grid>
 
   <virtualizedTreeView:VirtualizedTreeView Grid.Row="1"
                    Name="tree"
