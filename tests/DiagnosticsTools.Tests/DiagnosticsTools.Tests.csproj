@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DiagnosticsTools/DiagnosticsTools/DiagnosticsTools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.*" />
+    <PackageReference Include="Avalonia.Headless" Version="11.*" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.*" />
+  <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
+  <PackageReference Include="xunit" Version="2.8.0" />
+  <PackageReference Include="xunit.runner.visualstudio" Version="2.8.0" PrivateAssets="All" />
+  </ItemGroup>
+</Project>

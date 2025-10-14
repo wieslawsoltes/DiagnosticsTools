@@ -13,27 +13,64 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{4AE8
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsToolsSample", "samples\DiagnosticsToolsSample\DiagnosticsToolsSample.csproj", "{4B181F44-419D-4DF1-835D-548DF7E309D4}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Tests", "tests\DiagnosticsTools.Tests\DiagnosticsTools.Tests.csproj", "{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|x64.Build.0 = Debug|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Debug|x86.Build.0 = Debug|Any CPU
 		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|x64.ActiveCfg = Release|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|x64.Build.0 = Release|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|x86.ActiveCfg = Release|Any CPU
+		{EE479C39-22DA-43CA-A140-5A49B9EC6357}.Release|x86.Build.0 = Release|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|x64.Build.0 = Debug|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|x86.Build.0 = Debug|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|x64.ActiveCfg = Release|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|x64.Build.0 = Release|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|x86.ActiveCfg = Release|Any CPU
+		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|x86.Build.0 = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|x64.Build.0 = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Debug|x86.Build.0 = Debug|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|x64.ActiveCfg = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|x64.Build.0 = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|x86.ActiveCfg = Release|Any CPU
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{DF97BB81-EFB4-4ED9-8C1B-EC3C07AAD39F} = {F00CCEAC-F5A0-400B-8B44-1793558F2B66}
 		{EE479C39-22DA-43CA-A140-5A49B9EC6357} = {DF97BB81-EFB4-4ED9-8C1B-EC3C07AAD39F}
 		{4B181F44-419D-4DF1-835D-548DF7E309D4} = {4AE8F4C3-0462-4DB0-885D-3F5974FA095F}
+		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

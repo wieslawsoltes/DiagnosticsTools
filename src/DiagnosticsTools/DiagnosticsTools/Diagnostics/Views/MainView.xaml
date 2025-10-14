@@ -267,6 +267,7 @@
     <TabStrip Grid.Row="2" SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
       <TabStripItem Content="Logical Tree" />
       <TabStripItem Content="Visual Tree" />
+      <TabStripItem Content="Combined Tree" />
       <TabStripItem Content="Events" />
       <TabStripItem Content="HotKeys" IsVisible="False" />
     </TabStrip>
