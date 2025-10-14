@@ -79,11 +79,13 @@ namespace Avalonia.Diagnostics.Views
         {
             if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
             {
-                var @do = new DataObject();
                 var text = ToText(selector);
-                @do.Set(DataFormats.Text, text);
-                @do.Set(Constants.DataFormats.Avalonia_DevTools_Selector, selector);
-                clipboard.SetDataObjectAsync(@do);
+                var transfer = new DataTransfer();
+                transfer.Add(DataTransferItem.CreateText(text));
+                transfer.Add(DataTransferItem.Create(
+                    DataFormat.CreateStringApplicationFormat(Constants.DataFormats.Avalonia_DevTools_Selector),
+                    selector));
+                _ = clipboard.SetDataAsync(transfer);
             }
         }
 

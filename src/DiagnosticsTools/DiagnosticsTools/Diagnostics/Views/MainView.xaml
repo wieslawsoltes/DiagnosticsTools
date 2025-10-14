@@ -269,6 +269,7 @@
       <TabStripItem Content="Visual Tree" />
       <TabStripItem Content="Combined Tree" />
       <TabStripItem Content="Events" />
+      <TabStripItem Content="Metrics" />
       <TabStripItem Content="HotKeys" IsVisible="False" />
     </TabStrip>
 

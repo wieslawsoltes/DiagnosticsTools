@@ -1,0 +1,264 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:metrics="clr-namespace:Avalonia.Diagnostics.ViewModels.Metrics;assembly=DiagnosticsTools"
+             xmlns:conv="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
+             x:Class="Avalonia.Diagnostics.Views.MetricsPageView"
+             x:DataType="metrics:MetricsPageViewModel"
+             Margin="12">
+  <UserControl.Resources>
+    <conv:SparklinePointsConverter x:Key="SparklineConverter" />
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="Border.metric-card">
+      <Setter Property="Background" Value="{DynamicResource ThemeControlBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeControlMidBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
+    <Style Selector="Border.metric-card.warning">
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccentBrush}" />
+    </Style>
+
+    <Style Selector="Border.metric-card.critical">
+      <Setter Property="BorderBrush" Value="#FFD64545" />
+      <Setter Property="Background" Value="#10D64545" />
+    </Style>
+
+    <Style Selector="Border.metric-card TextBlock.metric-label">
+      <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
+    </Style>
+
+    <Style Selector="Border.metric-card Polyline">
+      <Setter Property="Stroke" Value="{DynamicResource ThemeAccentBrush}" />
+      <Setter Property="StrokeThickness" Value="1.5" />
+      <Setter Property="Fill" Value="Transparent" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,2*" RowSpacing="12">
+    <Border Padding="10" Background="{DynamicResource ThemeControlLowBrush}" CornerRadius="6">
+      <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <TextBlock Text="Metrics Controls" FontWeight="Bold" VerticalAlignment="Center" />
+        <Border Width="1" Height="16" Margin="4,0" Background="{DynamicResource ThemeControlMidBrush}" />
+        <ToggleSwitch Content="Pause capture"
+                      IsChecked="{Binding IsCapturePaused}">
+          <ToolTip.Tip>
+            <TextBlock Text="Temporarily stop ingesting new metrics while keeping existing samples." />
+          </ToolTip.Tip>
+        </ToggleSwitch>
+        <Button Content="Pause" Command="{Binding PauseCommand}">
+          <ToolTip.Tip>
+            <TextBlock Text="Freeze updates without changing the toggle state." />
+          </ToolTip.Tip>
+        </Button>
+        <Button Content="Resume" Command="{Binding ResumeCommand}" />
+        <Button Content="Clear metrics" Command="{Binding ClearCommand}">
+          <ToolTip.Tip>
+            <TextBlock Text="Reset histogram, gauge, and activity buffers." />
+          </ToolTip.Tip>
+        </Button>
+        <Button Content="Export snapshot" Command="{Binding ExportSnapshotCommand}">
+          <ToolTip.Tip>
+            <TextBlock Text="Copy the current metrics snapshot to the clipboard as JSON." />
+          </ToolTip.Tip>
+        </Button>
+        <StackPanel Orientation="Horizontal" Spacing="4" Margin="18,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="Filter" VerticalAlignment="Center" />
+          <TextBox Width="180"
+                   Text="{Binding Timeline.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   Watermark="Search activities" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <TextBlock Text="Min duration (ms)" VerticalAlignment="Center" />
+          <NumericUpDown Width="100"
+                         Minimum="0"
+                         Maximum="60000"
+                         Increment="1"
+                         Value="{Binding Timeline.MinimumDurationMilliseconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,4,*" ColumnSpacing="12">
+      <Border Grid.Column="0" Padding="8" Background="{DynamicResource ThemeControlMidBrush}" CornerRadius="4">
+        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+          <TextBlock Text="Timing Histograms" FontWeight="Bold" FontSize="14" />
+          <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Histograms}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="metrics:HistogramMetricViewModel">
+                  <Border Classes="metric-card">
+                    <Border.Styles>
+                      <Style Selector="Border" x:DataType="metrics:HistogramMetricViewModel">
+                        <Setter Property="Classes.warning" Value="{Binding IsWarning}" />
+                        <Setter Property="Classes.critical" Value="{Binding IsCritical}" />
+                      </Style>
+                    </Border.Styles>
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        <TextBlock Classes="metric-label"
+                                   Text="{Binding ThresholdDescription}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1"
+                                 HorizontalAlignment="Right"
+                                 Classes="metric-label"
+                                 Text="{Binding Samples.Length, StringFormat={}{0} samples}" />
+
+                      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Min" />
+                          <TextBlock Text="{Binding Minimum, StringFormat={}{0:F2} ms}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Avg" />
+                          <TextBlock Text="{Binding Average, StringFormat={}{0:F2} ms}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="p95" />
+                          <TextBlock Text="{Binding Percentile95, StringFormat={}{0:F2} ms}" FontWeight="Bold" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Max" />
+                          <TextBlock Text="{Binding Maximum, StringFormat={}{0:F2} ms}" />
+                        </StackPanel>
+                      </StackPanel>
+
+                      <Viewbox Grid.Row="2" Grid.ColumnSpan="2" Height="36">
+                        <Polyline Points="{Binding Samples, Converter={StaticResource SparklineConverter}}"
+                                  Stretch="Fill" />
+                      </Viewbox>
+                    </Grid>
+
+                    <ToolTip.Tip>
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding ThresholdDescription}" />
+                        <TextBlock Text="Percentile 95 reflects near-worst frame timings." />
+                      </StackPanel>
+                    </ToolTip.Tip>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource ThemeControlMidBrush}" />
+
+  <Border Grid.Column="2" Padding="8" Background="{DynamicResource ThemeControlMidBrush}" CornerRadius="4">
+        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+          <TextBlock Text="Resource Gauges" FontWeight="Bold" FontSize="14" />
+          <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Gauges}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="metrics:GaugeMetricViewModel">
+                  <Border Classes="metric-card">
+                    <Border.Styles>
+                      <Style Selector="Border" x:DataType="metrics:GaugeMetricViewModel">
+                        <Setter Property="Classes.warning" Value="{Binding IsWarning}" />
+                        <Setter Property="Classes.critical" Value="{Binding IsCritical}" />
+                      </Style>
+                    </Border.Styles>
+
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        <TextBlock Classes="metric-label"
+                                   Text="{Binding ThresholdDescription}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1"
+                                 HorizontalAlignment="Right"
+                                 Classes="metric-label"
+                                 Text="{Binding History.Length, StringFormat={}{0} samples}" />
+
+                      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Current" />
+                          <TextBlock Text="{Binding Current, StringFormat={}{0:F0}}" FontWeight="Bold" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Δ" />
+                          <TextBlock Text="{Binding Delta, StringFormat={}{0:+0;-0;0}}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Min" />
+                          <TextBlock Text="{Binding Minimum, StringFormat={}{0:F0}}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Classes="metric-label" Text="Max" />
+                          <TextBlock Text="{Binding Maximum, StringFormat={}{0:F0}}" />
+                        </StackPanel>
+                      </StackPanel>
+
+                      <Viewbox Grid.Row="2" Grid.ColumnSpan="2" Height="32">
+                        <Polyline Points="{Binding History, Converter={StaticResource SparklineConverter}}"
+                                  Stretch="Fill" />
+                      </Viewbox>
+                    </Grid>
+
+                    <ToolTip.Tip>
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding ThresholdDescription}" />
+                        <TextBlock Text="Gauge history represents last observed samples." />
+                      </StackPanel>
+                    </ToolTip.Tip>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="2" Padding="8" Background="{DynamicResource ThemeControlMidBrush}" CornerRadius="4">
+      <Grid RowDefinitions="Auto,*" RowSpacing="8">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="Activity Timeline" FontWeight="Bold" FontSize="14" />
+          <TextBlock Text="{Binding Timeline.Groups.Count, StringFormat={}{0} groups}" />
+          <TextBlock Text="Capture paused"
+                     Foreground="{DynamicResource ThemeForegroundLowBrush}"
+                     FontStyle="Italic"
+                     IsVisible="{Binding Timeline.IsPaused}" />
+        </StackPanel>
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Timeline.Groups}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="metrics:ActivityTimelineViewModel+ActivityGroupViewModel">
+                <Border Padding="8" Margin="0,0,0,8" Background="{DynamicResource ThemeControlBrush}" CornerRadius="4">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                    <ItemsControl ItemsSource="{Binding Items}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="metrics:ActivityTimelineViewModel+ActivityItemViewModel">
+                            <StackPanel Spacing="2">
+                              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" />
+                                <TextBlock Grid.Column="1" Text="{Binding Duration.TotalMilliseconds, StringFormat={}{0:F2} ms}" />
+                                <TextBlock Grid.Column="2" Text="{Binding StartTime, StringFormat={}{0:HH:mm:ss.fff}}" />
+                              </Grid>
+                              <StackPanel Orientation="Horizontal" Spacing="12">
+                                <TextBlock Text="{Binding ParentId, StringFormat=Parent: {0}}" />
+                                <TextBlock Text="{Binding Id, StringFormat=Id: {0}}" />
+                              </StackPanel>
+                            </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

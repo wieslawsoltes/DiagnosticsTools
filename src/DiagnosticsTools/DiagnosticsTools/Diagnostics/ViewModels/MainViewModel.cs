@@ -9,6 +9,8 @@ using Avalonia.Reactive;
 using Avalonia.Rendering;
 using System.Collections.Generic;
 using Avalonia.Media;
+using Avalonia.Diagnostics.Metrics;
+using Avalonia.Diagnostics.ViewModels.Metrics;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -16,10 +18,12 @@ namespace Avalonia.Diagnostics.ViewModels
     {
         private readonly AvaloniaObject _root;
         private readonly TreePageViewModel _logicalTree;
-    private readonly TreePageViewModel _visualTree;
-    private readonly CombinedTreePageViewModel _combinedTree;
+        private readonly TreePageViewModel _visualTree;
+        private readonly CombinedTreePageViewModel _combinedTree;
         private readonly EventsPageViewModel _events;
         private readonly HotKeyPageViewModel _hotKeys;
+        private readonly MetricsListenerService _metricsListener;
+        private readonly MetricsPageViewModel _metrics;
         private readonly IDisposable _pointerOverSubscription;
         private ViewModelBase? _content;
         private int _selectedTab;
@@ -44,6 +48,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties);
             _events = new EventsPageViewModel(this);
             _hotKeys = new HotKeyPageViewModel();
+            _metricsListener = new MetricsListenerService();
+            _metrics = new MetricsPageViewModel(_metricsListener);
 
             UpdateFocusedControl();
 
@@ -202,6 +208,9 @@ namespace Avalonia.Diagnostics.ViewModels
                         Content = _events;
                         break;
                     case 4:
+                        Content = _metrics;
+                        break;
+                    case 5:
                         Content = _hotKeys;
                         break;
                     default:
@@ -243,7 +252,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void ShowHotKeys()
         {
-            SelectedTab = 4;
+            SelectedTab = 5;
         }
 
         public void SelectControl(Control control)
@@ -269,6 +278,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _logicalTree.Dispose();
             _visualTree.Dispose();
             _combinedTree.Dispose();
+            _metrics.Dispose();
+            _metricsListener.Dispose();
             _currentFocusHighlightAdorner?.Dispose();
             if (TryGetRenderer() is { } renderer)
             {
@@ -403,6 +414,7 @@ namespace Avalonia.Diagnostics.ViewModels
             DevToolsViewKind.VisualTree => 1,
             DevToolsViewKind.CombinedTree => 2,
             DevToolsViewKind.Events => 3,
+            DevToolsViewKind.Metrics => 4,
             _ => 0,
         };
     }

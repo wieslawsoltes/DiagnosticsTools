@@ -41,10 +41,12 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public AvaloniaObject? TemplateOwner { get; }
 
+        public string RoleKey => Role.ToString();
+
         public string? RoleLabel => Role switch
         {
-            CombinedNodeRole.Template => "[Template]",
-            CombinedNodeRole.PopupHost => "[Popup]",
+            CombinedNodeRole.Template => "/template/",
+            CombinedNodeRole.PopupHost => "/popup/",
             _ => null,
         };
 
@@ -54,24 +56,23 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 if (Role == CombinedNodeRole.Template)
                 {
-                    var ownerName = TemplateOwner?.GetType().Name;
+                    var segment = !string.IsNullOrEmpty(TemplateName)
+                        ? TemplateName
+                        : Visual.GetType().Name;
 
-                    if (!string.IsNullOrEmpty(TemplateName) && !string.IsNullOrEmpty(ownerName))
+                    if (TemplateOwner is { } owner)
                     {
-                        return $"{TemplateName} • {ownerName}";
+                        return owner.GetType().Name is { Length: > 0 } ownerName
+                            ? $"{segment} • {ownerName}"
+                            : segment;
                     }
 
-                    if (!string.IsNullOrEmpty(TemplateName))
-                    {
-                        return TemplateName;
-                    }
-
-                    return ownerName;
+                    return segment;
                 }
 
-                if (Role == CombinedNodeRole.PopupHost)
+                if (Role == CombinedNodeRole.PopupHost && TemplateOwner is { } popupOwner)
                 {
-                    return TemplateOwner?.GetType().Name;
+                    return popupOwner.GetType().Name;
                 }
 
                 return null;
