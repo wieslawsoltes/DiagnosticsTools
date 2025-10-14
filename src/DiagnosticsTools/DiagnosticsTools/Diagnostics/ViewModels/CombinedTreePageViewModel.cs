@@ -14,6 +14,20 @@ namespace Avalonia.Diagnostics.ViewModels
         {
         }
 
+        private bool _searchLogicalNodesOnly = true;
+
+        public bool SearchLogicalNodesOnly
+        {
+            get => _searchLogicalNodesOnly;
+            set
+            {
+                if (RaiseAndSetIfChanged(ref _searchLogicalNodesOnly, value))
+                {
+                    ApplyTreeFilter();
+                }
+            }
+        }
+
         public static CombinedTreePageViewModel FromRoot(
             MainViewModel mainView,
             AvaloniaObject root,
@@ -26,6 +40,24 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties);
+        }
+
+        protected override bool CanNodeMatch(TreeNode node)
+        {
+            if (SearchLogicalNodesOnly)
+            {
+                if (node is CombinedTreeTemplateGroupNode)
+                {
+                    return false;
+                }
+
+                if (node is CombinedTreeNode combinedNode)
+                {
+                    return combinedNode.Role != CombinedTreeNode.CombinedNodeRole.Template;
+                }
+            }
+
+            return base.CanNodeMatch(node);
         }
     }
 }

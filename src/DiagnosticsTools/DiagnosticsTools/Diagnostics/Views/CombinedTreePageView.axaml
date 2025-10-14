@@ -48,14 +48,20 @@
   </UserControl.DataTemplates>
   <Grid ColumnDefinitions="0.35*,4,0.65*">
     <Grid RowDefinitions="Auto,*">
-      <controls:FilterTextBox Grid.Row="0"
-                              Margin="0,0,0,4"
-                              DataContext="{Binding TreeFilter}"
-                              Text="{Binding FilterString}"
-                              Watermark="Search tree"
-                              UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
-                              UseWholeWordFilter="{Binding UseWholeWordFilter}"
-                              UseRegexFilter="{Binding UseRegexFilter}" />
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,0,0,4">
+        <controls:FilterTextBox Grid.Column="0"
+                                DataContext="{Binding TreeFilter}"
+                                Text="{Binding FilterString}"
+                                Watermark="Search tree"
+                                UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
+                                UseWholeWordFilter="{Binding UseWholeWordFilter}"
+                                UseRegexFilter="{Binding UseRegexFilter}" />
+
+        <CheckBox Grid.Column="1"
+                  VerticalAlignment="Center"
+                  Content="Logical only"
+                  IsChecked="{Binding SearchLogicalNodesOnly}" />
+      </Grid>
 
       <virtualizedTreeView:VirtualizedTreeView Grid.Row="1" Name="tree"
                                                BorderThickness="0"

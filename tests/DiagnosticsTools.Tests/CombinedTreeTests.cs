@@ -90,6 +90,29 @@ namespace DiagnosticsTools.Tests
             Assert.Same(templateNode, combinedTree.SelectedNode);
         }
 
+        [AvaloniaFact]
+        public void CombinedTree_Filter_Logical_Only_Ignores_Template_Matches()
+        {
+            var control = new TestTemplatedControl();
+            control.ApplyTemplate();
+            Dispatcher.UIThread.RunJobs();
+
+            using var mainViewModel = new MainViewModel(control);
+            var pinned = new HashSet<string>();
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned);
+
+            combinedTree.TreeFilter.FilterString = "Border";
+
+            var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
+            var templateGroup = root.Children.OfType<CombinedTreeTemplateGroupNode>().Single();
+            Assert.False(templateGroup.IsExpanded);
+
+            combinedTree.SearchLogicalNodesOnly = false;
+
+            Assert.True(templateGroup.IsVisible);
+            Assert.True(templateGroup.IsExpanded);
+        }
+
         private class TestTemplatedControl : TemplatedControl
         {
             public TestTemplatedControl()

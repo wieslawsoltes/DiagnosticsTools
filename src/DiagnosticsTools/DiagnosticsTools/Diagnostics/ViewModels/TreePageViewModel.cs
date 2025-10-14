@@ -479,7 +479,9 @@ namespace Avalonia.Diagnostics.ViewModels
             Details?.UpdatePropertiesView(MainView?.ShowImplementedInterfaces ?? true);
         }
 
-        private void ApplyTreeFilter()
+        protected virtual bool CanNodeMatch(TreeNode node) => true;
+
+        protected void ApplyTreeFilter()
         {
             var hasFilter = !string.IsNullOrWhiteSpace(TreeFilter.FilterString);
 
@@ -518,24 +520,33 @@ namespace Avalonia.Diagnostics.ViewModels
 
             bool FilterNode(TreeNode node, bool ancestorMatch)
             {
-                var matches = TreeFilter.Filter(node.SearchText);
-                var forceVisible = ancestorMatch || matches;
-                var hasVisibleChild = false;
+                var matches = hasFilter && CanNodeMatch(node) && TreeFilter.Filter(node.SearchText);
+                var hasMatchInChildren = false;
 
                 foreach (var child in node.Children)
                 {
-                    hasVisibleChild |= FilterNode(child, forceVisible);
+                    var childHasMatch = FilterNode(child, ancestorMatch || matches);
+
+                    if (hasFilter && !childHasMatch)
+                    {
+                        child.IsExpanded = false;
+                    }
+
+                    if (childHasMatch)
+                    {
+                        hasMatchInChildren = true;
+                    }
                 }
 
-                var isVisible = matches || hasVisibleChild || ancestorMatch;
-                node.IsVisible = hasFilter ? isVisible : true;
+                var hasResult = matches || hasMatchInChildren;
+                node.IsVisible = hasFilter ? (hasResult || ancestorMatch && !CanNodeMatch(node)) : true;
 
-                if (hasFilter && (forceVisible || hasVisibleChild) && node.HasChildren)
+                if (hasFilter && node.HasChildren)
                 {
-                    node.IsExpanded = true;
+                    node.IsExpanded = hasResult;
                 }
 
-                return isVisible;
+                return hasResult;
             }
 
             void ResetVisibility(TreeNode node)

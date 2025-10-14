@@ -23,8 +23,9 @@ public class TreePageViewModelTests
 
         var rootNode = Assert.Single(treeViewModel.Nodes);
         Assert.True(rootNode.IsVisible);
+        Assert.True(rootNode.IsExpanded);
         var childNode = Assert.Single(rootNode.Children);
-        Assert.True(childNode.IsVisible);
+        Assert.False(childNode.IsVisible);
     }
 
     [AvaloniaFact]
