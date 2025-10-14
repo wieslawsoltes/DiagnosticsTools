@@ -11,6 +11,14 @@
               PointerMoved="UpdateAdorner"
               PointerExited="RemoveAdorner">
       <TreeView.DataTemplates>
+        <TreeDataTemplate DataType="vm:CombinedTreeTemplateGroupNode"
+                          ItemsSource="{Binding Children}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{Binding Type}"
+                       FontStyle="Italic"
+                       Foreground="{DynamicResource ThemeForegroundLowBrush}" />
+          </StackPanel>
+        </TreeDataTemplate>
         <TreeDataTemplate DataType="vm:CombinedTreeNode"
                           ItemsSource="{Binding Children}">
           <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}">

@@ -198,11 +198,14 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 switch (value)
                 {
+                    case 0:
+                        Content = _combinedTree;
+                        break;
                     case 1:
-                        Content = _visualTree;
+                        Content = _logicalTree;
                         break;
                     case 2:
-                        Content = _combinedTree;
+                        Content = _visualTree;
                         break;
                     case 3:
                         Content = _events;
@@ -214,7 +217,7 @@ namespace Avalonia.Diagnostics.ViewModels
                         Content = _hotKeys;
                         break;
                     default:
-                        Content = _logicalTree;
+                        Content = _combinedTree;
                         break;
                 }
 
@@ -317,7 +320,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             if (node != null)
             {
-                SelectedTab = isVisualTree ? 1 : 0;
+                SelectedTab = isVisualTree ? 2 : 1;
 
                 tree.SelectControl(control);
                 return;
@@ -326,7 +329,7 @@ namespace Avalonia.Diagnostics.ViewModels
             var combinedNode = _combinedTree.FindNode(control);
             if (combinedNode != null)
             {
-                SelectedTab = 2;
+                SelectedTab = 0;
                 _combinedTree.SelectControl(control);
             }
         }
@@ -411,11 +414,12 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private static int MapLaunchViewToTab(DevToolsViewKind viewKind) => viewKind switch
         {
-            DevToolsViewKind.VisualTree => 1,
-            DevToolsViewKind.CombinedTree => 2,
+            DevToolsViewKind.CombinedTree => 0,
+            DevToolsViewKind.LogicalTree => 1,
+            DevToolsViewKind.VisualTree => 2,
             DevToolsViewKind.Events => 3,
             DevToolsViewKind.Metrics => 4,
-            _ => 0,
+            _ => 1,
         };
     }
 }

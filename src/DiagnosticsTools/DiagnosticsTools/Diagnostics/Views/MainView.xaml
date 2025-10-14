@@ -251,10 +251,10 @@
         </MenuItem>
       </MenuItem>
     </Menu>
-  <TabStrip Grid.Row="1" SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
+    <TabStrip Grid.Row="1" SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
+      <TabStripItem Content="Combined Tree" />
       <TabStripItem Content="Logical Tree" />
       <TabStripItem Content="Visual Tree" />
-      <TabStripItem Content="Combined Tree" />
       <TabStripItem Content="Events" />
       <TabStripItem Content="Metrics" />
       <TabStripItem Content="HotKeys" IsVisible="False" />

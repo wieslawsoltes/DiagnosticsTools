@@ -45,7 +45,6 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public string? RoleLabel => Role switch
         {
-            CombinedNodeRole.Template => "/template/",
             CombinedNodeRole.PopupHost => "/popup/",
             _ => null,
         };
@@ -95,6 +94,7 @@ namespace Avalonia.Diagnostics.ViewModels
             private readonly CombinedTreeNode _owner;
             private readonly List<LogicalEntry> _logical = new();
             private readonly List<TemplateEntry> _templates = new();
+            private CombinedTreeTemplateGroupNode? _templateGroup;
             private PopupEntry? _popup;
             private AvaloniaList<TreeNode>? _nodes;
             private CombinedLogicalChildrenTracker? _logicalTracker;
@@ -147,6 +147,9 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     entry.Node.Dispose();
                 }
+
+                _templateGroup?.Dispose();
+                _templateGroup = null;
 
                 if (_popup is { } popup)
                 {
@@ -231,9 +234,10 @@ namespace Avalonia.Diagnostics.ViewModels
                     insertIndex++;
                 }
 
+                var group = EnsureTemplateGroup();
                 var node = new CombinedTreeNode(
                     visual,
-                    _owner,
+                    group,
                     CombinedNodeRole.Template,
                     customTypeName,
                     templateName,
@@ -274,6 +278,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 _templates.Clear();
+                _templateGroup?.UpdateChildren(Array.Empty<TreeNode>());
                 RebuildNodes();
             }
 
@@ -319,15 +324,45 @@ namespace Avalonia.Diagnostics.ViewModels
                     _nodes.Add(entry.Node);
                 }
 
-                foreach (var entry in _templates)
+                if (_templates.Count > 0)
                 {
-                    _nodes.Add(entry.Node);
+                    var group = EnsureTemplateGroup();
+                    group.UpdateChildren(GetTemplateNodesSnapshot());
+                    _nodes.Add(group);
+                }
+                else if (_templateGroup is { } existingGroup)
+                {
+                    existingGroup.UpdateChildren(Array.Empty<TreeNode>());
                 }
 
                 if (_popup is { } popup)
                 {
                     _nodes.Add(popup.Node);
                 }
+            }
+
+            private CombinedTreeTemplateGroupNode EnsureTemplateGroup()
+            {
+                return _templateGroup ??= new CombinedTreeTemplateGroupNode(_owner)
+                {
+                    IsExpanded = true,
+                };
+            }
+
+            private IReadOnlyList<TreeNode> GetTemplateNodesSnapshot()
+            {
+                if (_templates.Count == 0)
+                {
+                    return Array.Empty<TreeNode>();
+                }
+
+                var result = new TreeNode[_templates.Count];
+                for (var i = 0; i < _templates.Count; i++)
+                {
+                    result[i] = _templates[i].Node;
+                }
+
+                return result;
             }
 
             private readonly struct LogicalEntry
