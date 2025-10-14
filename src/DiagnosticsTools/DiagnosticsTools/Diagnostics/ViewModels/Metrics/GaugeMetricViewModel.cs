@@ -11,6 +11,8 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         private double _minimum;
         private double _maximum;
         private double[] _history = Array.Empty<double>();
+        private TimedSample[] _timeline = Array.Empty<TimedSample>();
+        private DateTimeOffset? _lastSampleTimestamp;
         private double? _warningThreshold;
         private double? _criticalThreshold;
         private bool _isWarning;
@@ -48,6 +50,18 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         {
             get => _history;
             private set => RaiseAndSetIfChanged(ref _history, value);
+        }
+
+        public TimedSample[] Timeline
+        {
+            get => _timeline;
+            private set => RaiseAndSetIfChanged(ref _timeline, value);
+        }
+
+        public DateTimeOffset? LastSampleTimestamp
+        {
+            get => _lastSampleTimestamp;
+            private set => RaiseAndSetIfChanged(ref _lastSampleTimestamp, value);
         }
 
         public double? WarningThreshold
@@ -101,6 +115,10 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             Minimum = snapshot.Minimum;
             Maximum = snapshot.Maximum;
             History = ToArray(snapshot.History);
+            Timeline = ToTimeline(snapshot.Timeline);
+            LastSampleTimestamp = Timeline.Length > 0
+                ? Timeline[Timeline.Length - 1].Timestamp.ToLocalTime()
+                : null;
             _hasPrevious = true;
             UpdateStatus();
         }
@@ -120,6 +138,16 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             }
 
             return source as double[] ?? source.ToArray();
+        }
+
+        private static TimedSample[] ToTimeline(IReadOnlyCollection<TimedSample> timeline)
+        {
+            if (timeline.Count == 0)
+            {
+                return Array.Empty<TimedSample>();
+            }
+
+            return timeline as TimedSample[] ?? timeline.ToArray();
         }
 
         private void UpdateStatus()

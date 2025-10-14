@@ -12,11 +12,13 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         private double _average;
         private double _percentile95;
         private double[] _samples = Array.Empty<double>();
-    private double? _warningThreshold;
-    private double? _criticalThreshold;
-    private bool _isWarning;
-    private bool _isCritical;
-    private string _thresholdDescription = string.Empty;
+        private TimedSample[] _timeline = Array.Empty<TimedSample>();
+        private DateTimeOffset? _lastSampleTimestamp;
+        private double? _warningThreshold;
+        private double? _criticalThreshold;
+        private bool _isWarning;
+        private bool _isCritical;
+        private string _thresholdDescription = string.Empty;
 
         public HistogramMetricViewModel(string name)
         {
@@ -53,6 +55,18 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         {
             get => _samples;
             private set => RaiseAndSetIfChanged(ref _samples, value);
+        }
+
+        public TimedSample[] Timeline
+        {
+            get => _timeline;
+            private set => RaiseAndSetIfChanged(ref _timeline, value);
+        }
+
+        public DateTimeOffset? LastSampleTimestamp
+        {
+            get => _lastSampleTimestamp;
+            private set => RaiseAndSetIfChanged(ref _lastSampleTimestamp, value);
         }
 
         public double? WarningThreshold
@@ -92,6 +106,10 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             Average = stats.Average;
             Percentile95 = stats.Percentile95;
             Samples = ToArray(stats.Snapshot);
+            Timeline = ToTimeline(stats.Timeline);
+            LastSampleTimestamp = Timeline.Length > 0
+                ? Timeline[Timeline.Length - 1].Timestamp.ToLocalTime()
+                : null;
             UpdateStatus();
         }
 
@@ -110,6 +128,16 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             }
 
             return snapshot as double[] ?? snapshot.ToArray();
+        }
+
+        private static TimedSample[] ToTimeline(IReadOnlyCollection<TimedSample> timeline)
+        {
+            if (timeline.Count == 0)
+            {
+                return Array.Empty<TimedSample>();
+            }
+
+            return timeline as TimedSample[] ?? timeline.ToArray();
         }
 
         private void UpdateStatus()

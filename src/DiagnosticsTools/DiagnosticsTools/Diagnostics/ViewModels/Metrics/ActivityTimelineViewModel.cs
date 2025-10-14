@@ -55,7 +55,7 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             _groups.Clear();
         }
 
-    public void Update(IReadOnlyDictionary<string, IReadOnlyCollection<ActivitySample>> snapshots)
+        public void Update(IReadOnlyDictionary<string, IReadOnlyCollection<ActivitySample>> snapshots)
         {
             if (IsPaused)
             {

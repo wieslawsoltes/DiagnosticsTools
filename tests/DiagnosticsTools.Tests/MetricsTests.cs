@@ -31,6 +31,14 @@ namespace DiagnosticsTools.Tests
         }
 
         [AvaloniaFact]
+        public void MetricsListenerService_enables_diagnostics_switch()
+        {
+            using var listener = new MetricsListenerService();
+
+            Assert.True(AppContext.TryGetSwitch("Avalonia.Diagnostics.Diagnostic.IsEnabled", out var enabled) && enabled);
+        }
+
+        [AvaloniaFact]
         public async Task MetricsListenerService_ignores_non_prefixed_instruments()
         {
             using var listener = new MetricsListenerService(histogramCapacity: 4);
@@ -147,6 +155,22 @@ namespace DiagnosticsTools.Tests
 
             Assert.False(string.IsNullOrWhiteSpace(exported));
             Assert.Contains("avalonia.ui.render.time", exported!, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [AvaloniaFact]
+        public async Task MetricsPageViewModel_tracks_last_sample_timestamp()
+        {
+            using var listener = new MetricsListenerService();
+            using var meter = new Meter("Avalonia.Diagnostics.Tests", "1.0");
+            var histogram = meter.CreateHistogram<double>("avalonia.ui.arrange.time");
+            using var viewModel = new MetricsPageViewModel(listener, TimeSpan.Zero);
+
+            histogram.Record(5);
+            await PumpDispatcherAsync();
+
+            var metric = Assert.Single(viewModel.Histograms);
+            Assert.NotNull(metric.LastSampleTimestamp);
+            Assert.NotEmpty(metric.Timeline);
         }
 
         [AvaloniaFact]

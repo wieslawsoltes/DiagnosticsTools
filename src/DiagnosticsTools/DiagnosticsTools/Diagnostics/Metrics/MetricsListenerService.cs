@@ -29,6 +29,8 @@ namespace Avalonia.Diagnostics.Metrics
             int gaugeHistoryCapacity = 60,
             int activityCapacity = 512)
         {
+            DiagnosticInstrumentation.EnsureInitialized();
+
             _histogramCapacity = histogramCapacity;
             _gaugeHistoryCapacity = gaugeHistoryCapacity;
             _activityCapacity = activityCapacity;
@@ -119,7 +121,7 @@ namespace Avalonia.Diagnostics.Metrics
             EnqueueOnContext(() =>
             {
                 var stats = _histograms.GetOrAdd(instrument.Name, name => new HistogramStats(name, _histogramCapacity));
-                stats.Add(measurement);
+                stats.Add(measurement, DateTimeOffset.UtcNow);
                 MetricsUpdated?.Invoke(this, EventArgs.Empty);
             });
         }
@@ -144,7 +146,7 @@ namespace Avalonia.Diagnostics.Metrics
             EnqueueOnContext(() =>
             {
                 var snapshot = _gauges.GetOrAdd(instrument.Name, name => new ObservableGaugeSnapshot(name, _gaugeHistoryCapacity));
-                snapshot.Update(measurement);
+                snapshot.Update(measurement, DateTimeOffset.UtcNow);
                 GaugesUpdated?.Invoke(this, EventArgs.Empty);
             });
         }

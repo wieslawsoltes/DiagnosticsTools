@@ -2,11 +2,23 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:metrics="clr-namespace:Avalonia.Diagnostics.ViewModels.Metrics;assembly=DiagnosticsTools"
              xmlns:conv="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
+             xmlns:ctrl="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.MetricsPageView"
              x:DataType="metrics:MetricsPageViewModel"
              Margin="12">
   <UserControl.Resources>
-    <conv:SparklinePointsConverter x:Key="SparklineConverter" />
+    <conv:MetricBrushConverter x:Key="HistogramStrokeBrushConverter"
+                               Kind="Histogram"
+                               Alpha="1" />
+    <conv:MetricBrushConverter x:Key="HistogramFillBrushConverter"
+                               Kind="Histogram"
+                               Alpha="0.26" />
+    <conv:MetricBrushConverter x:Key="GaugeStrokeBrushConverter"
+                               Kind="Gauge"
+                               Alpha="1" />
+    <conv:MetricBrushConverter x:Key="GaugeFillBrushConverter"
+                               Kind="Gauge"
+                               Alpha="0.26" />
   </UserControl.Resources>
 
   <UserControl.Styles>
@@ -15,8 +27,8 @@
       <Setter Property="BorderBrush" Value="{DynamicResource ThemeControlMidBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="6" />
-      <Setter Property="Padding" Value="10" />
-      <Setter Property="Margin" Value="0,0,0,8" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="Margin" Value="8" />
     </Style>
 
     <Style Selector="Border.metric-card.warning">
@@ -32,10 +44,12 @@
       <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
     </Style>
 
-    <Style Selector="Border.metric-card Polyline">
-      <Setter Property="Stroke" Value="{DynamicResource ThemeAccentBrush}" />
-      <Setter Property="StrokeThickness" Value="1.5" />
-      <Setter Property="Fill" Value="Transparent" />
+    <Style Selector="ctrl|TimelineGraph">
+      <Setter Property="GridBrush" Value="{DynamicResource ThemeControlMidBrush}" />
+      <Setter Property="BaselineBrush" Value="{DynamicResource ThemeForegroundLowBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
+      <Setter Property="GridLineCount" Value="4" />
+      <Setter Property="Margin" Value="0,6,0,0" />
     </Style>
   </UserControl.Styles>
 
@@ -86,52 +100,81 @@
     <Grid Grid.Row="1" ColumnDefinitions="*,4,*" ColumnSpacing="12">
       <Border Grid.Column="0" Padding="8" Background="{DynamicResource ThemeControlMidBrush}" CornerRadius="4">
         <Grid RowDefinitions="Auto,*" RowSpacing="8">
-          <TextBlock Text="Timing Histograms" FontWeight="Bold" FontSize="14" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Timing Histograms" FontWeight="Bold" FontSize="14" />
+            <TextBlock Grid.Column="1"
+                       HorizontalAlignment="Right"
+                       Classes="metric-label"
+                       Text="{Binding Histograms.Count, StringFormat={}{0} series}" />
+          </Grid>
           <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Histograms}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="metrics:HistogramMetricViewModel">
-                  <Border Classes="metric-card">
+                  <Border Classes="metric-card" Width="360">
                     <Border.Styles>
                       <Style Selector="Border" x:DataType="metrics:HistogramMetricViewModel">
                         <Setter Property="Classes.warning" Value="{Binding IsWarning}" />
                         <Setter Property="Classes.critical" Value="{Binding IsCritical}" />
                       </Style>
                     </Border.Styles>
-                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
-                      <StackPanel Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                        <TextBlock Classes="metric-label"
-                                   Text="{Binding ThresholdDescription}" />
-                      </StackPanel>
-                      <TextBlock Grid.Column="1"
-                                 HorizontalAlignment="Right"
-                                 Classes="metric-label"
-                                 Text="{Binding Samples.Length, StringFormat={}{0} samples}" />
 
-                      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+                      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Ellipse Width="10" Height="10"
+                                   VerticalAlignment="Center"
+                                   Fill="{Binding Name, Converter={StaticResource HistogramStrokeBrushConverter}}" />
+                          <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1"
+                                   HorizontalAlignment="Right"
+                                   Classes="metric-label"
+                                   Text="{Binding Samples.Length, StringFormat={}{0} samples}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                   Classes="metric-label"
+                                   Text="{Binding LastSampleTimestamp, StringFormat=Updated {0:HH:mm:ss}}"
+                                   IsVisible="{Binding LastSampleTimestamp, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                   Classes="metric-label"
+                                   Text="Waiting for samples"
+                                   IsVisible="{Binding LastSampleTimestamp, Converter={x:Static ObjectConverters.IsNull}}" />
+                      </Grid>
+
+                      <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="16">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Min" />
                           <TextBlock Text="{Binding Minimum, StringFormat={}{0:F2} ms}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Avg" />
                           <TextBlock Text="{Binding Average, StringFormat={}{0:F2} ms}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="p95" />
                           <TextBlock Text="{Binding Percentile95, StringFormat={}{0:F2} ms}" FontWeight="Bold" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Max" />
                           <TextBlock Text="{Binding Maximum, StringFormat={}{0:F2} ms}" />
                         </StackPanel>
-                      </StackPanel>
+                      </Grid>
 
-                      <Viewbox Grid.Row="2" Grid.ColumnSpan="2" Height="36">
-                        <Polyline Points="{Binding Samples, Converter={StaticResource SparklineConverter}}"
-                                  Stretch="Fill" />
-                      </Viewbox>
+                      <TextBlock Grid.Row="2"
+                                 Classes="metric-label"
+                                 Text="{Binding ThresholdDescription}"
+                                 IsVisible="{Binding ThresholdDescription, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                      <ctrl:TimelineGraph Grid.Row="3"
+                                           Height="148"
+                                           Values="{Binding Samples}"
+                                           Stroke="{Binding Name, Converter={StaticResource HistogramStrokeBrushConverter}}"
+                                           AreaFill="{Binding Name, Converter={StaticResource HistogramFillBrushConverter}}" />
                     </Grid>
 
                     <ToolTip.Tip>
@@ -153,12 +196,23 @@
 
   <Border Grid.Column="2" Padding="8" Background="{DynamicResource ThemeControlMidBrush}" CornerRadius="4">
         <Grid RowDefinitions="Auto,*" RowSpacing="8">
-          <TextBlock Text="Resource Gauges" FontWeight="Bold" FontSize="14" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Resource Gauges" FontWeight="Bold" FontSize="14" />
+            <TextBlock Grid.Column="1"
+                       HorizontalAlignment="Right"
+                       Classes="metric-label"
+                       Text="{Binding Gauges.Count, StringFormat={}{0} series}" />
+          </Grid>
           <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Gauges}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="metrics:GaugeMetricViewModel">
-                  <Border Classes="metric-card">
+                  <Border Classes="metric-card" Width="320">
                     <Border.Styles>
                       <Style Selector="Border" x:DataType="metrics:GaugeMetricViewModel">
                         <Setter Property="Classes.warning" Value="{Binding IsWarning}" />
@@ -166,40 +220,57 @@
                       </Style>
                     </Border.Styles>
 
-                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
-                      <StackPanel Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                        <TextBlock Classes="metric-label"
-                                   Text="{Binding ThresholdDescription}" />
-                      </StackPanel>
-                      <TextBlock Grid.Column="1"
-                                 HorizontalAlignment="Right"
-                                 Classes="metric-label"
-                                 Text="{Binding History.Length, StringFormat={}{0} samples}" />
+                    <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+                      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Ellipse Width="10" Height="10"
+                                   VerticalAlignment="Center"
+                                   Fill="{Binding Name, Converter={StaticResource GaugeStrokeBrushConverter}}" />
+                          <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1"
+                                   HorizontalAlignment="Right"
+                                   Classes="metric-label"
+                                   Text="{Binding History.Length, StringFormat={}{0} samples}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                   Classes="metric-label"
+                                   Text="{Binding LastSampleTimestamp, StringFormat=Updated {0:HH:mm:ss}}"
+                                   IsVisible="{Binding LastSampleTimestamp, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                   Classes="metric-label"
+                                   Text="Waiting for samples"
+                                   IsVisible="{Binding LastSampleTimestamp, Converter={x:Static ObjectConverters.IsNull}}" />
+                      </Grid>
 
-                      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                      <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="14">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Current" />
                           <TextBlock Text="{Binding Current, StringFormat={}{0:F0}}" FontWeight="Bold" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Δ" />
                           <TextBlock Text="{Binding Delta, StringFormat={}{0:+0;-0;0}}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Min" />
                           <TextBlock Text="{Binding Minimum, StringFormat={}{0:F0}}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <StackPanel Spacing="2">
                           <TextBlock Classes="metric-label" Text="Max" />
                           <TextBlock Text="{Binding Maximum, StringFormat={}{0:F0}}" />
                         </StackPanel>
-                      </StackPanel>
+                      </Grid>
 
-                      <Viewbox Grid.Row="2" Grid.ColumnSpan="2" Height="32">
-                        <Polyline Points="{Binding History, Converter={StaticResource SparklineConverter}}"
-                                  Stretch="Fill" />
-                      </Viewbox>
+                      <TextBlock Grid.Row="2"
+                                 Classes="metric-label"
+                                 Text="{Binding ThresholdDescription}"
+                                 IsVisible="{Binding ThresholdDescription, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                      <ctrl:TimelineGraph Grid.Row="3"
+                                           Height="120"
+                                           Values="{Binding History}"
+                                           Stroke="{Binding Name, Converter={StaticResource GaugeStrokeBrushConverter}}"
+                                           AreaFill="{Binding Name, Converter={StaticResource GaugeFillBrushConverter}}" />
                     </Grid>
 
                     <ToolTip.Tip>
