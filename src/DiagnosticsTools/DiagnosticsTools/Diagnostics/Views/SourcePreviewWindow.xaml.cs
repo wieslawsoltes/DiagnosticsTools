@@ -1,18 +1,25 @@
 using System;
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Diagnostics.ViewModels;
+using Avalonia.Media;
 using Avalonia.Threading;
+using AvaloniaEdit;
+using AvaloniaEdit.Document;
+using AvaloniaEdit.Rendering;
 
 namespace Avalonia.Diagnostics.Views
 {
     public partial class SourcePreviewWindow : Window
     {
         private SourcePreviewViewModel? _viewModel;
-        private TextBox? _snippetTextBox;
+        private TextEditor? _snippetTextEditor;
+        private HighlightedLineColorizer? _highlightColorizer;
+        private string? _currentSnippet;
+        private IBrush? _highlightBrush;
 
         public SourcePreviewWindow()
         {
@@ -23,7 +30,17 @@ namespace Avalonia.Diagnostics.Views
         private void InitializeComponent()
         {
             AvaloniaXamlLoader.Load(this);
-            _snippetTextBox = this.FindControl<TextBox>("SnippetTextBox");
+            _snippetTextEditor = this.FindControl<TextEditor>("SnippetTextEditor");
+
+            if (_snippetTextEditor is not null)
+            {
+                _highlightBrush = CreateHighlightBrush();
+                _highlightColorizer = new HighlightedLineColorizer
+                {
+                    HighlightBrush = _highlightBrush
+                };
+                _snippetTextEditor.TextArea.TextView.LineTransformers.Add(_highlightColorizer);
+            }
         }
 
         public static void Show(TopLevel? owner, SourcePreviewViewModel viewModel)
@@ -157,115 +174,146 @@ namespace Avalonia.Diagnostics.Views
 
         private void TryUpdateHighlight(SourcePreviewViewModel vm)
         {
-            if (_snippetTextBox is null)
+            if (_snippetTextEditor is null)
             {
                 return;
             }
 
-            if (vm.Snippet is null || vm.HighlightedLine is null)
+            var snippet = vm.Snippet;
+            var highlightedLine = vm.HighlightedLine;
+            var snippetStart = vm.SnippetStartLine;
+
+            if (snippet is null)
             {
-                Dispatcher.UIThread.Post(ClearSelection, DispatcherPriority.Background);
+                Dispatcher.UIThread.Post(ClearPreview, DispatcherPriority.Background);
                 return;
             }
 
-            var lineIndex = vm.HighlightedLine.Value - vm.SnippetStartLine;
-            if (lineIndex < 0)
-            {
-                Dispatcher.UIThread.Post(ClearSelection, DispatcherPriority.Background);
-                return;
-            }
-
-            if (!TryGetLineRange(vm.Snippet, lineIndex, out var start, out var length))
-            {
-                Dispatcher.UIThread.Post(ClearSelection, DispatcherPriority.Background);
-                return;
-            }
-
-            Dispatcher.UIThread.Post(() => ApplySelection(vm, start, length), DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() => ApplySnippetAndHighlight(vm, snippet, highlightedLine, snippetStart), DispatcherPriority.Background);
         }
 
-        private void ApplySelection(SourcePreviewViewModel vm, int start, int length)
+        private void ApplySnippetAndHighlight(SourcePreviewViewModel vm, string snippet, int? highlightedLine, int snippetStartLine)
         {
-            if (_snippetTextBox is null || _viewModel != vm || vm.Snippet is null)
+            if (_snippetTextEditor is null || _viewModel != vm)
             {
                 return;
             }
 
-            var snippetLength = vm.Snippet.Length;
-            var safeStart = Clamp(start, 0, snippetLength);
-            var safeLength = Clamp(length, 0, snippetLength - safeStart);
+            var document = _snippetTextEditor.Document;
+            var snippetChanged = !string.Equals(_currentSnippet, snippet, StringComparison.Ordinal);
+            if (document is null)
+            {
+                _snippetTextEditor.Document = new TextDocument(snippet);
+                _currentSnippet = snippet;
+            }
+            else if (snippetChanged)
+            {
+                document.Text = snippet;
+                _currentSnippet = snippet;
+            }
 
-            _snippetTextBox.SelectionStart = safeStart;
-            _snippetTextBox.SelectionEnd = safeStart + safeLength;
-            _snippetTextBox.CaretIndex = _snippetTextBox.SelectionEnd;
+            UpdateHighlight(highlightedLine, snippetStartLine);
         }
 
-        private void ClearSelection()
+        private void ClearPreview()
         {
-            if (_snippetTextBox is null)
+            if (_snippetTextEditor is null)
             {
                 return;
             }
 
-            _snippetTextBox.SelectionStart = 0;
-            _snippetTextBox.SelectionEnd = 0;
-            _snippetTextBox.CaretIndex = 0;
-        }
+            _currentSnippet = null;
 
-    private static bool TryGetLineRange(string text, int lineIndex, out int start, out int length)
-        {
-            start = 0;
-            length = 0;
-
-            if (lineIndex < 0)
+            if (_snippetTextEditor.Document is { } document)
             {
-                return false;
+                document.Text = string.Empty;
+            }
+            else
+            {
+                _snippetTextEditor.Document = new TextDocument();
             }
 
-            var currentIndex = 0;
-            var currentLine = 0;
-
-            while (currentLine < lineIndex)
+            if (_highlightColorizer is not null)
             {
-                var nextBreak = text.IndexOf('\n', currentIndex);
-                if (nextBreak < 0)
+                _highlightColorizer.LineNumber = null;
+                _snippetTextEditor.TextArea.TextView.InvalidateVisual();
+            }
+        }
+
+        private void UpdateHighlight(int? highlightedLine, int snippetStartLine)
+        {
+            if (_snippetTextEditor is null || _highlightColorizer is null)
+            {
+                return;
+            }
+
+            var document = _snippetTextEditor.Document;
+            if (highlightedLine is null || document is null || document.LineCount == 0)
+            {
+                if (_highlightColorizer.LineNumber is not null)
                 {
-                    return false;
+                    _highlightColorizer.LineNumber = null;
+                    _snippetTextEditor.TextArea.TextView.InvalidateVisual();
+                }
+                return;
+            }
+
+            var targetLine = highlightedLine.Value - snippetStartLine + 1;
+            if (targetLine < 1 || targetLine > document.LineCount)
+            {
+                if (_highlightColorizer.LineNumber is not null)
+                {
+                    _highlightColorizer.LineNumber = null;
+                    _snippetTextEditor.TextArea.TextView.InvalidateVisual();
+                }
+                return;
+            }
+
+            if (_highlightColorizer.LineNumber != targetLine)
+            {
+                _highlightColorizer.LineNumber = targetLine;
+            }
+
+            _snippetTextEditor.ScrollTo(targetLine, 0);
+            _snippetTextEditor.TextArea.Caret.Position = new TextViewPosition(targetLine, 0);
+            _snippetTextEditor.TextArea.TextView.InvalidateVisual();
+        }
+
+        private IBrush CreateHighlightBrush()
+        {
+            if (Application.Current?.TryFindResource("ThemeAccentBrush", out var resource) == true &&
+                resource is ISolidColorBrush accent)
+            {
+                var accentColor = accent.Color;
+                var highlightColor = Color.FromArgb(0x60, accentColor.R, accentColor.G, accentColor.B);
+                return new SolidColorBrush(highlightColor);
+            }
+
+            return new SolidColorBrush(Color.FromArgb(0x60, 0x56, 0x9C, 0xD6));
+        }
+
+        private sealed class HighlightedLineColorizer : DocumentColorizingTransformer
+        {
+            public int? LineNumber { get; set; }
+            public IBrush? HighlightBrush { get; init; }
+
+            protected override void ColorizeLine(DocumentLine line)
+            {
+                if (HighlightBrush is null || LineNumber is null)
+                {
+                    return;
                 }
 
-                currentIndex = nextBreak + 1;
-                currentLine++;
+                if (line.LineNumber != LineNumber.Value)
+                {
+                    return;
+                }
+
+                ChangeLinePart(line.Offset, line.EndOffset, element =>
+                {
+                    element.TextRunProperties.SetBackgroundBrush(HighlightBrush);
+                });
             }
-
-            if (currentIndex >= text.Length)
-            {
-                return false;
-            }
-
-            var lineEnd = text.IndexOf('\n', currentIndex);
-            if (lineEnd < 0)
-            {
-                lineEnd = text.Length;
-            }
-
-            start = currentIndex;
-            length = lineEnd - currentIndex;
-            return true;
-        }
-
-        private static int Clamp(int value, int min, int max)
-        {
-            if (value < min)
-            {
-                return min;
-            }
-
-            if (value > max)
-            {
-                return max;
-            }
-
-            return value;
         }
     }
 }

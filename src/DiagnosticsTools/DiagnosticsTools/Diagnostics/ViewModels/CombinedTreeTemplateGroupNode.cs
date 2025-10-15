@@ -8,16 +8,20 @@ namespace Avalonia.Diagnostics.ViewModels
     public sealed class CombinedTreeTemplateGroupNode : TreeNode
     {
         private readonly TemplateGroupChildren _children;
+        private readonly CombinedTreeNode _owner;
 
         public CombinedTreeTemplateGroupNode(CombinedTreeNode owner)
             : base(new AvaloniaObject(), owner, "/template/")
         {
+            _owner = owner;
             _children = new TemplateGroupChildren(this);
             Children = RegisterChildren(_children);
             IsExpanded = true;
         }
 
         public override TreeNodeCollection Children { get; }
+
+        public CombinedTreeNode Owner => _owner;
 
         internal void UpdateChildren(IReadOnlyList<TreeNode> templates)
         {

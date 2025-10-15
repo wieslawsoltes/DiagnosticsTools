@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows.Input;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Styling;
@@ -304,13 +305,70 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             try
             {
-                var info = await _sourceInfoService.GetForAvaloniaObjectAsync(node.Visual).ConfigureAwait(false);
+                SourceInfo? info = null;
+
+                if (node is CombinedTreeTemplateGroupNode templateGroup)
+                {
+                    info = await TryResolveControlThemeAsync(templateGroup.Owner.Visual).ConfigureAwait(false);
+                    if (info is not null)
+                    {
+                        return info;
+                    }
+                }
+
+                info = await _sourceInfoService.GetForAvaloniaObjectAsync(node.Visual).ConfigureAwait(false);
+
+                if (info is null &&
+                    node is CombinedTreeNode { Role: CombinedTreeNode.CombinedNodeRole.Template, TemplateOwner: { } templateOwner })
+                {
+                    info = await TryResolveControlThemeAsync(templateOwner).ConfigureAwait(false);
+                }
+
                 if (info is null)
                 {
                     info = await _sourceInfoService.GetForMemberAsync(node.Visual.GetType()).ConfigureAwait(false);
                 }
 
                 return info;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task<SourceInfo?> TryResolveControlThemeAsync(AvaloniaObject? owner)
+        {
+            if (owner is not StyledElement styledElement)
+            {
+                return null;
+            }
+
+            ControlTheme? theme = null;
+
+            try
+            {
+                theme = styledElement.GetEffectiveTheme();
+            }
+            catch
+            {
+                // Ignored – failing to resolve theme should not prevent other lookup paths.
+            }
+
+            if (theme is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var info = await _sourceInfoService.GetForAvaloniaObjectAsync(theme).ConfigureAwait(false);
+                if (info is not null)
+                {
+                    return info;
+                }
+
+                return await _sourceInfoService.GetForValueFrameAsync(theme).ConfigureAwait(false);
             }
             catch
             {

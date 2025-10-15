@@ -66,12 +66,61 @@ namespace Avalonia.Diagnostics.SourceNavigation
             {
                 if (TryMatch(entry.Path, normalized, out var suffix))
                 {
-                    var resolved = entry.Url.Replace("*", suffix);
+                    var resolved = ReplaceWildcard(entry.Url, suffix);
                     return Uri.TryCreate(resolved, UriKind.Absolute, out var uri) ? uri : null;
                 }
             }
 
             return null;
+        }
+
+        private static string ReplaceWildcard(string url, string suffix)
+        {
+            string result;
+
+            if (string.IsNullOrEmpty(suffix))
+            {
+                result = url.Replace("*", string.Empty);
+#if NETSTANDARD2_0
+                result = result.Replace("%2A", string.Empty);
+                result = result.Replace("%2a", string.Empty);
+#else
+                result = result.Replace("%2A", string.Empty, StringComparison.OrdinalIgnoreCase);
+#endif
+                return result;
+            }
+
+            var encoded = EncodePathForUrl(suffix);
+#if NETSTANDARD2_0
+            result = url.Replace("*", encoded);
+            result = result.Replace("%2A", encoded);
+            result = result.Replace("%2a", encoded);
+#else
+            result = url.Replace("*", encoded, StringComparison.Ordinal);
+            result = result.Replace("%2A", encoded, StringComparison.OrdinalIgnoreCase);
+#endif
+            return result;
+        }
+
+        private static string EncodePathForUrl(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return string.Empty;
+            }
+
+            var segments = path.Split('/');
+            for (var i = 0; i < segments.Length; i++)
+            {
+                if (segments[i].Length == 0)
+                {
+                    continue;
+                }
+
+                segments[i] = Uri.EscapeDataString(segments[i]);
+            }
+
+            return string.Join("/", segments);
         }
 
         private static bool TryMatch(string pattern, string candidate, out string suffix)

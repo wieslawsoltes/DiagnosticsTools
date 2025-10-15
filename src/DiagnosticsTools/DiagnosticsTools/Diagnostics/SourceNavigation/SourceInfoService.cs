@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Net.Http;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
@@ -24,6 +25,8 @@ namespace Avalonia.Diagnostics.SourceNavigation
         private readonly ConcurrentBag<PortablePdbResolver> _ownedResolvers = new();
     private readonly ConcurrentDictionary<Type, Task<XamlDocument?>> _xamlDocumentCache = new();
     private readonly ConcurrentDictionary<Assembly, Task<ResourceXamlInfo>> _xamlInfoCache = new();
+    private readonly ConcurrentDictionary<Uri, Task<XDocument?>> _remoteXamlCache = new();
+        private static readonly HttpClient SharedHttpClient = new();
         private bool _disposed;
 
         public async ValueTask<SourceInfo?> GetForMemberAsync(MemberInfo member)
@@ -369,6 +372,11 @@ namespace Avalonia.Diagnostics.SourceNavigation
                 document = await TryLoadXamlFromAssetsAsync(rootType).ConfigureAwait(false);
             }
 
+            if (document is null && rootInfo.RemoteUri is { } remoteUri)
+            {
+                document = await TryLoadXamlFromRemoteAsync(remoteUri).ConfigureAwait(false);
+            }
+
             if (document?.Root is null)
             {
                 return null;
@@ -409,6 +417,36 @@ namespace Avalonia.Diagnostics.SourceNavigation
         private Task<ResourceXamlInfo> GetResourceXamlInfoAsync(Assembly assembly)
         {
             return _xamlInfoCache.GetOrAdd(assembly, asm => Task.Run(() => LoadResourceXamlInfo(asm)));
+        }
+
+        private Task<XDocument?> TryLoadXamlFromRemoteAsync(Uri remoteUri)
+        {
+            if (!remoteUri.IsAbsoluteUri)
+            {
+                return Task.FromResult<XDocument?>(null);
+            }
+
+            var scheme = remoteUri.Scheme;
+            if (!string.Equals(scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<XDocument?>(null);
+            }
+
+            return _remoteXamlCache.GetOrAdd(remoteUri, LoadRemoteXamlAsync);
+        }
+
+        private async Task<XDocument?> LoadRemoteXamlAsync(Uri remoteUri)
+        {
+            try
+            {
+                using var stream = await SharedHttpClient.GetStreamAsync(remoteUri).ConfigureAwait(false);
+                return LoadXamlDocument(stream);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static ResourceXamlInfo LoadResourceXamlInfo(Assembly assembly)

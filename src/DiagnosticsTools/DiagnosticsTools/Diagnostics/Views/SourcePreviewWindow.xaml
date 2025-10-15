@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+        xmlns:avaloniaedit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
         x:Class="Avalonia.Diagnostics.Views.SourcePreviewWindow"
         x:DataType="viewModels:SourcePreviewViewModel"
         x:CompileBindings="True"
@@ -13,6 +14,7 @@
   WindowStartupLocation="CenterOwner"
   CanResize="True">
   <Window.Styles>
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
     <Style Selector="TextBox.preview">
       <Setter Property="FontFamily" Value="Consolas, Courier New, Menlo, monospace" />
       <Setter Property="FontSize" Value="12" />
@@ -34,29 +36,33 @@
                  IsVisible="{Binding IsLoading}" />
       <Border Background="{DynamicResource ThemeAccentBrush}" Padding="4" CornerRadius="4"
               IsVisible="{Binding HasError}">
-        <TextBlock Text="{Binding ErrorMessage}" Foreground="White" />
+      <TextBlock Text="{Binding ErrorMessage}" Foreground="White" />
       </Border>
     </StackPanel>
 
     <Border BorderBrush="{DynamicResource ThemeBorderMidBrush}" BorderThickness="1" Margin="0 8">
-      <ScrollViewer>
-        <TextBox Classes="preview"
-                 x:Name="SnippetTextBox"
-                 Text="{Binding Snippet}"
-                 IsVisible="{Binding HasSnippet}" />
-      </ScrollViewer>
+      <Grid RowDefinitions="*,Auto">
+        <avaloniaedit:TextEditor x:Name="SnippetTextEditor"
+                                 IsReadOnly="True"
+                                 ShowLineNumbers="True"
+                                 WordWrap="False"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas, Courier New, Menlo, monospace"
+                                 FontSize="12"
+                                 IsVisible="{Binding HasSnippet}" />
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="8">
+          <Button Content="Open"
+                  Click="OpenClick" />
+          <Button Content="Copy snippet"
+                  Click="CopySnippetClick"
+                  IsEnabled="{Binding HasSnippet}" />
+          <Button Content="Copy path"
+                  Click="CopyPathClick" />
+          <Button Content="Close"
+                  Click="CloseClick" />
+        </StackPanel>
+      </Grid>
     </Border>
-
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-      <Button Content="Open"
-              Click="OpenClick" />
-      <Button Content="Copy snippet"
-              Click="CopySnippetClick"
-              IsEnabled="{Binding HasSnippet}" />
-      <Button Content="Copy path"
-              Click="CopyPathClick" />
-      <Button Content="Close"
-              Click="CloseClick" />
-    </StackPanel>
   </DockPanel>
 </Window>
