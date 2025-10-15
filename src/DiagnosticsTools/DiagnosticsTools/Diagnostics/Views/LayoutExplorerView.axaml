@@ -4,7 +4,8 @@
              xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
              xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
-             x:DataType="viewModels:ControlLayoutViewModel">
+             x:DataType="viewModels:ControlLayoutViewModel"
+             x:CompileBindings="True">
 
     <UserControl.Resources>
         <SolidColorBrush x:Key="SizeGuidelineBrush" Color="#333333" />

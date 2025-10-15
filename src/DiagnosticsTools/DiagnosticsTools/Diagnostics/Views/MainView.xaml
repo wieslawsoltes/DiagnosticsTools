@@ -4,7 +4,8 @@
              xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
              xmlns:convertes="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.MainView"
-             x:DataType="viewModels:MainViewModel">
+             x:DataType="viewModels:MainViewModel"
+             x:CompileBindings="True">
   <UserControl.Resources>
     <x:Double x:Key="SampleSize">16</x:Double>
     <convertes:BrushSelectorConveter x:Key="bsc"

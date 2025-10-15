@@ -5,7 +5,8 @@
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
              xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.CombinedTreePageView"
-             x:DataType="vm:CombinedTreePageViewModel">
+             x:DataType="vm:CombinedTreePageViewModel"
+             x:CompileBindings="True">
   <UserControl.Resources>
     <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
   </UserControl.Resources>
@@ -117,10 +118,10 @@
         <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
           <MenuFlyout>
             <MenuItem Header="Preview source"
-                      Command="{Binding PreviewSource}"
+                      Command="{Binding PreviewSourceCommand}"
                       IsEnabled="{Binding CanPreviewSource}" />
             <MenuItem Header="Navigate to source"
-                      Command="{Binding NavigateToSource}"
+                      Command="{Binding NavigateToSourceCommand}"
                       IsEnabled="{Binding CanNavigateToSource}" />
             <MenuItem Header="-" />
             <MenuItem Header="Copy">

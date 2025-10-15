@@ -5,7 +5,8 @@
         xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
         Title="Avalonia DevTools"
         x:Class="Avalonia.Diagnostics.Views.MainWindow"
-        x:DataType="viewModels:MainViewModel">
+        x:DataType="viewModels:MainViewModel"
+        x:CompileBindings="True">
   <Window.DataTemplates>
     <diag:ViewLocator/>
   </Window.DataTemplates>

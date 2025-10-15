@@ -75,6 +75,8 @@ namespace Avalonia.Diagnostics.ViewModels
             get;
         }
 
+        public virtual bool IsInTemplate => false;
+
         public AvaloniaObject Visual
         {
             get;

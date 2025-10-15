@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.Metrics
@@ -15,10 +14,6 @@ namespace Avalonia.Diagnostics.Metrics
         private readonly MeterListener _meterListener;
         private readonly ActivityListener _activityListener;
         private readonly SynchronizationContext? _syncContext;
-        private readonly ConcurrentQueue<Action> _pendingActions = new();
-        private readonly SemaphoreSlim _workSignal = new(0);
-        private readonly CancellationTokenSource _workerCts = new();
-        private readonly Task _workerTask;
 
         private readonly ConcurrentDictionary<string, HistogramStats> _histograms = new();
         private readonly ConcurrentDictionary<string, ObservableGaugeSnapshot> _gauges = new();
@@ -28,9 +23,9 @@ namespace Avalonia.Diagnostics.Metrics
         private readonly int _histogramCapacity;
         private readonly int _activityCapacity;
         private int _isPaused;
-    private volatile bool _isDisposed;
+        private volatile bool _isDisposed;
 
-        private static readonly SendOrPostCallback RunBatchCallback = state => ((Action)state!).Invoke();
+        private static readonly SendOrPostCallback InvokeActionCallback = state => ((Action)state!).Invoke();
 
         public MetricsListenerService(
             int histogramCapacity = 120,
@@ -60,7 +55,6 @@ namespace Avalonia.Diagnostics.Metrics
             };
 
             _syncContext = SynchronizationContext.Current;
-            _workerTask = Task.Run(ProcessQueueAsync);
 
             ActivitySource.AddActivityListener(_activityListener);
             _meterListener.Start();
@@ -114,23 +108,6 @@ namespace Avalonia.Diagnostics.Metrics
             _meterListener.Dispose();
             // ActivityListener removed automatically when disposed
             _activityListener.Dispose();
-
-            _workerCts.Cancel();
-            _workSignal.Release();
-
-            try
-            {
-                _workerTask.Wait(TimeSpan.FromSeconds(1));
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
-            {
-            }
-
-            _workSignal.Dispose();
-            _workerCts.Dispose();
         }
 
         private void OnInstrumentPublished(Instrument instrument, MeterListener listener)
@@ -220,69 +197,19 @@ namespace Avalonia.Diagnostics.Metrics
                 return;
             }
 
-            _pendingActions.Enqueue(action);
-            _workSignal.Release();
-        }
-
-        private async Task ProcessQueueAsync()
-        {
-            try
-            {
-                while (true)
-                {
-                    await _workSignal.WaitAsync(_workerCts.Token).ConfigureAwait(false);
-
-                    var batch = new List<Action>();
-
-                    while (_pendingActions.TryDequeue(out var action))
-                    {
-                        batch.Add(action);
-                    }
-
-                    if (batch.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    DispatchBatch(batch);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Worker is shutting down.
-            }
-        }
-
-        private void DispatchBatch(List<Action> batch)
-        {
-            if (batch.Count == 0)
-            {
-                return;
-            }
-
-            var actions = batch.ToArray();
-
-            void RunActions()
-            {
-                foreach (var action in actions)
-                {
-                    action();
-                }
-            }
-
             if (_syncContext is not null)
             {
-                _syncContext.Post(RunBatchCallback, (Action)RunActions);
+                _syncContext.Post(InvokeActionCallback, action);
                 return;
             }
 
             if (Dispatcher.UIThread.CheckAccess())
             {
-                RunActions();
+                action();
                 return;
             }
 
-            Dispatcher.UIThread.Post(RunActions, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(action, DispatcherPriority.Background);
         }
 
         private sealed class RingBuffer<T>

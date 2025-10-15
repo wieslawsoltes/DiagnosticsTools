@@ -3,6 +3,7 @@
         xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
         x:Class="Avalonia.Diagnostics.Views.SourcePreviewWindow"
         x:DataType="viewModels:SourcePreviewViewModel"
+        x:CompileBindings="True"
         Title="Source Preview"
   Width="720"
   Height="520"

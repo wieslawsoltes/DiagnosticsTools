@@ -18,7 +18,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private int _snippetStartLine;
         private int? _highlightedLine;
 
-        public SourcePreviewViewModel(SourceInfo sourceInfo, ISourceNavigator sourceNavigator, HttpClient? httpClient = null)
+        public SourcePreviewViewModel(SourceInfo sourceInfo, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, string? initialErrorMessage = null)
         {
             SourceInfo = sourceInfo ?? throw new ArgumentNullException(nameof(sourceInfo));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
@@ -26,6 +26,11 @@ namespace Avalonia.Diagnostics.ViewModels
             Title = string.IsNullOrWhiteSpace(SourceInfo.DisplayPath)
                 ? "Source Preview"
                 : SourceInfo.DisplayPath;
+            if (!string.IsNullOrEmpty(initialErrorMessage))
+            {
+                ErrorMessage = initialErrorMessage;
+                IsLoading = false;
+            }
         }
 
         public SourceInfo SourceInfo { get; }
@@ -140,6 +145,14 @@ namespace Avalonia.Diagnostics.ViewModels
         public async Task OpenSourceAsync()
         {
             await _sourceNavigator.NavigateAsync(SourceInfo).ConfigureAwait(false);
+        }
+
+        public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null)
+        {
+            var messageContext = string.IsNullOrWhiteSpace(context) ? "the requested item" : context;
+            var message = $"Source information for {messageContext} is unavailable.";
+            var placeholderInfo = new SourceInfo(null, null, null, null, null, null, SourceOrigin.Unknown);
+            return new SourcePreviewViewModel(placeholderInfo, sourceNavigator, httpClient, message);
         }
 
         private async Task<string?> FetchContentAsync()

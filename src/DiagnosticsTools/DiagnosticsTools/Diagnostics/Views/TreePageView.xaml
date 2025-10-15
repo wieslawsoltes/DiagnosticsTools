@@ -5,7 +5,8 @@
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
              xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.TreePageView"
-             x:DataType="vm:TreePageViewModel">
+             x:DataType="vm:TreePageViewModel"
+             x:CompileBindings="True">
   <UserControl.Resources>
     <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
   </UserControl.Resources>
@@ -62,7 +63,7 @@
                    PointerMoved="UpdateAdorner"
                    PointerExited="RemoveAdorner">
       <virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
-        <DataTemplate>
+        <DataTemplate x:DataType="vm:TreeNode">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <StackPanel.Styles>
               <Style Selector="StackPanel[Tag=True]">
@@ -86,10 +87,10 @@
       <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
         <MenuFlyout>
           <MenuItem Header="Preview source"
-                    Command="{Binding PreviewSource}"
+                    Command="{Binding PreviewSourceCommand}"
                     IsEnabled="{Binding CanPreviewSource}" />
           <MenuItem Header="Navigate to source"
-                    Command="{Binding NavigateToSource}"
+                    Command="{Binding NavigateToSourceCommand}"
                     IsEnabled="{Binding CanNavigateToSource}" />
           <MenuItem Header="Copy">
             <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />

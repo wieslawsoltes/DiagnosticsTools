@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Diagnostics.SourceNavigation;
@@ -19,8 +20,11 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _isVisible;
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
-    private SourceInfo? _sourceInfo;
-    private Task<SourceInfo?>? _sourceInfoTask;
+        private SourceInfo? _sourceInfo;
+        private Task<SourceInfo?>? _sourceInfoTask;
+        private bool _sourceInfoLoadAttempted;
+        private readonly DelegateCommand _previewSourceCommand;
+        private readonly DelegateCommand _navigateToSourceCommand;
 
         public ValueFrameViewModel(
             StyledElement styledElement,
@@ -77,7 +81,9 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             Update();
-            _ = LoadSourceInfoAsync();
+
+            _previewSourceCommand = new DelegateCommand(PreviewSourceAsync, () => CanPreviewSource);
+            _navigateToSourceCommand = new DelegateCommand(NavigateToSourceAsync, () => CanNavigateToSource);
         }
 
         public bool IsActive
@@ -115,8 +121,10 @@ namespace Avalonia.Diagnostics.ViewModels
                 RaisePropertyChanged(nameof(SourceInfo));
                 RaisePropertyChanged(nameof(SourceSummary));
                 RaisePropertyChanged(nameof(HasSource));
+                RaisePropertyChanged(nameof(ShowSourceCommands));
                 RaisePropertyChanged(nameof(CanNavigateToSource));
                 RaisePropertyChanged(nameof(CanPreviewSource));
+                UpdateCommandStates();
             }
         }
 
@@ -124,13 +132,24 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool HasSource => SourceInfo is not null;
 
-    public bool CanNavigateToSource => SourceInfo is not null;
+        public bool ShowSourceCommands => SourceInfo is not null || !_sourceInfoLoadAttempted;
 
-    public bool CanPreviewSource => SourceInfo is not null;
+        public bool CanNavigateToSource => ShowSourceCommands;
 
-    internal event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
+        public bool CanPreviewSource => ShowSourceCommands;
+
+        public ICommand PreviewSourceCommand => _previewSourceCommand;
+
+        public ICommand NavigateToSourceCommand => _navigateToSourceCommand;
+
+        internal event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
 
         public async void NavigateToSource()
+        {
+            await NavigateToSourceAsync().ConfigureAwait(false);
+        }
+
+        private async Task NavigateToSourceAsync()
         {
             try
             {
@@ -150,17 +169,20 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public async void PreviewSource()
         {
+            await PreviewSourceAsync().ConfigureAwait(false);
+        }
+
+        private async Task PreviewSourceAsync()
+        {
             try
             {
                 var info = await LoadSourceInfoAsync().ConfigureAwait(false);
-                if (info is null)
-                {
-                    return;
-                }
 
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    var preview = new SourcePreviewViewModel(info, _sourceNavigator);
+                    var preview = info is not null
+                        ? new SourcePreviewViewModel(info, _sourceNavigator)
+                        : SourcePreviewViewModel.CreateUnavailable(Description, _sourceNavigator);
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
             }
@@ -189,8 +211,12 @@ namespace Avalonia.Diagnostics.ViewModels
             if (serviceChanged)
             {
                 _sourceInfoTask = null;
+                _sourceInfoLoadAttempted = false;
                 SourceInfo = null;
-                _ = LoadSourceInfoAsync();
+                RaisePropertyChanged(nameof(ShowSourceCommands));
+                RaisePropertyChanged(nameof(CanNavigateToSource));
+                RaisePropertyChanged(nameof(CanPreviewSource));
+                UpdateCommandStates();
             }
         }
         
@@ -266,6 +292,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 return existing;
             }
 
+            MarkSourceInfoLoadAttempted();
+
             async Task<SourceInfo?> ResolveAsync()
             {
                 try
@@ -284,6 +312,26 @@ namespace Avalonia.Diagnostics.ViewModels
             var task = ResolveAsync();
             _sourceInfoTask = task;
             return task;
+        }
+
+        private void MarkSourceInfoLoadAttempted()
+        {
+            if (_sourceInfoLoadAttempted)
+            {
+                return;
+            }
+
+            _sourceInfoLoadAttempted = true;
+            RaisePropertyChanged(nameof(ShowSourceCommands));
+            RaisePropertyChanged(nameof(CanNavigateToSource));
+            RaisePropertyChanged(nameof(CanPreviewSource));
+            UpdateCommandStates();
+        }
+
+        private void UpdateCommandStates()
+        {
+            _previewSourceCommand.RaiseCanExecuteChanged();
+            _navigateToSourceCommand.RaiseCanExecuteChanged();
         }
     }
 }

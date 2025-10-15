@@ -5,7 +5,8 @@
              xmlns:models="clr-namespace:Avalonia.Diagnostics.Models;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.EventsPageView"
              Margin="2"
-             x:DataType="vm:EventsPageViewModel">
+             x:DataType="vm:EventsPageViewModel"
+             x:CompileBindings="True">
   <UserControl.Styles>
     <Style Selector="TextBlock.nav" >
       <Setter Property="TextDecorations">

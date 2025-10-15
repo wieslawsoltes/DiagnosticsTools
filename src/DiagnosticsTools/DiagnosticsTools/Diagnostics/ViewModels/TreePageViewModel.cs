@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Styling;
@@ -27,6 +28,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
         private SourceInfo? _selectedNodeSourceInfo;
+        private readonly DelegateCommand _previewSourceCommand;
+        private readonly DelegateCommand _navigateToSourceCommand;
 
         public TreePageViewModel(
             MainViewModel mainView,
@@ -49,6 +52,9 @@ namespace Avalonia.Diagnostics.ViewModels
 
             TreeFilter = new FilterViewModel();
             TreeFilter.RefreshFilter += (s, e) => ApplyTreeFilter();
+
+            _previewSourceCommand = new DelegateCommand(PreviewSourceAsync, () => CanPreviewSource);
+            _navigateToSourceCommand = new DelegateCommand(NavigateToSourceAsync, () => CanNavigateToSource);
         }
 
     public event EventHandler<string>? ClipboardCopyRequested;
@@ -108,6 +114,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(CanScopeToSubTree));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
                     RaisePropertyChanged(nameof(CanPreviewSource));
+                    UpdateCommandStates();
                     SelectedNodeSourceInfo = null;
                     _ = UpdateSelectedNodeSourceInfoAsync(value);
                 }
@@ -125,6 +132,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(HasSelectedNodeSource));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
                     RaisePropertyChanged(nameof(CanPreviewSource));
+                    UpdateCommandStates();
                 }
             }
         }
@@ -133,9 +141,13 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool HasSelectedNodeSource => SelectedNodeSourceInfo is not null;
 
-    public bool CanNavigateToSource => HasSelectedNodeSource;
+        public bool CanNavigateToSource => HasSelectedNodeSource;
 
         public bool CanPreviewSource => HasSelectedNodeSource;
+
+        public ICommand PreviewSourceCommand => _previewSourceCommand;
+
+        public ICommand NavigateToSourceCommand => _navigateToSourceCommand;
 
         public ControlDetailsViewModel? Details
         {
@@ -176,6 +188,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public async void NavigateToSource()
         {
+            await NavigateToSourceAsync().ConfigureAwait(false);
+        }
+
+        private async Task NavigateToSourceAsync()
+        {
             var node = SelectedNode;
             if (node is null)
             {
@@ -197,8 +214,13 @@ namespace Avalonia.Diagnostics.ViewModels
                 // Navigation is best-effort.
             }
         }
-        
+
         public async void PreviewSource()
+        {
+            await PreviewSourceAsync().ConfigureAwait(false);
+        }
+
+        private async Task PreviewSourceAsync()
         {
             var node = SelectedNode;
             if (node is null)
@@ -209,14 +231,13 @@ namespace Avalonia.Diagnostics.ViewModels
             try
             {
                 var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
-                if (info is null)
-                {
-                    return;
-                }
 
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    var preview = new SourcePreviewViewModel(info, _sourceNavigator);
+                    var context = node.Visual?.GetType().Name ?? node.Type;
+                    var preview = info is not null
+                        ? new SourcePreviewViewModel(info, _sourceNavigator)
+                        : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator);
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
             }
@@ -252,6 +273,8 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
             }
+
+            UpdateCommandStates();
         }
 
         public TreeNode? FindNode(Control control)
@@ -520,6 +543,12 @@ namespace Avalonia.Diagnostics.ViewModels
         private void OnDetailsSourcePreviewRequested(object? sender, SourcePreviewViewModel e)
         {
             SourcePreviewRequested?.Invoke(this, e);
+        }
+
+        private void UpdateCommandStates()
+        {
+            _previewSourceCommand.RaiseCanExecuteChanged();
+            _navigateToSourceCommand.RaiseCanExecuteChanged();
         }
 
         internal void RestoreScope(TreeNode? scoped)

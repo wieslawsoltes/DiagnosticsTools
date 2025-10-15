@@ -28,7 +28,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 IsInTemplate = styleable.TemplatedParent != null;
         }
 
-        public bool IsInTemplate { get; }
+        public override bool IsInTemplate { get; }
 
         public override TreeNodeCollection Children { get; }
 

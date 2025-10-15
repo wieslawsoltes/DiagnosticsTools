@@ -3,7 +3,8 @@
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
              Padding="4"
              x:Class="Avalonia.Diagnostics.Views.HotKeyPageView"
-             x:DataType="vm:HotKeyPageViewModel">
+             x:DataType="vm:HotKeyPageViewModel"
+             x:CompileBindings="True">
   <Grid RowDefinitions="auto,*" Grid.IsSharedSizeScope="True">
     <Grid>
       <Grid.ColumnDefinitions>

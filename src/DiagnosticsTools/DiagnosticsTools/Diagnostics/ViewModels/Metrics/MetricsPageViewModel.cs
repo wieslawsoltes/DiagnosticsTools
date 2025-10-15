@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Diagnostics.Metrics;
+using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.ViewModels.Metrics
@@ -28,7 +28,7 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         private bool _activitiesDirty;
         private readonly TimeSpan _throttleInterval;
         private bool _isCapturePaused;
-        private CancellationTokenSource? _updateCts;
+        private DispatcherTimer? _updateTimer;
 
         public MetricsPageViewModel(MetricsListenerService listener, TimeSpan? throttleInterval = null)
         {
@@ -90,15 +90,12 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             _listener.GaugesUpdated -= OnGaugesDirty;
             _listener.ActivitiesUpdated -= OnActivitiesDirty;
 
-            CancellationTokenSource? cts;
-            lock (_updateLock)
+            if (_updateTimer is not null)
             {
-                cts = _updateCts;
-                _updateCts = null;
+                _updateTimer.Stop();
+                _updateTimer.Tick -= OnUpdateTimerTick;
+                _updateTimer = null;
             }
-
-            cts?.Cancel();
-            cts?.Dispose();
         }
 
         private void OnHistogramsDirty(object? sender, EventArgs e)
@@ -149,107 +146,81 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
                         break;
                 }
 
-                var previous = _updateCts;
-                previous?.Cancel();
-
-                var cts = new CancellationTokenSource();
-                _updateCts = cts;
-
-                ScheduleUpdate(cts.Token);
-
-                previous?.Dispose();
+                EnsureUpdateScheduled();
             }
         }
 
-        private void ScheduleUpdate(CancellationToken token)
+        private void EnsureUpdateScheduled()
         {
-            Task.Run(async () =>
+            if (!Dispatcher.UIThread.CheckAccess())
             {
-                try
+                Dispatcher.UIThread.Post(EnsureUpdateScheduled);
+                return;
+            }
+
+            if (_updateTimer is null)
+            {
+                _updateTimer = new DispatcherTimer
                 {
-                    await Task.Delay(_throttleInterval, token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
+                    Interval = _throttleInterval
+                };
+                _updateTimer.Tick += OnUpdateTimerTick;
+            }
 
-                bool updateHistograms;
-                bool updateGauges;
-                bool updateActivities;
+            _updateTimer.Stop();
+            _updateTimer.Start();
+        }
 
-                lock (_updateLock)
-                {
-                    updateHistograms = _histogramsDirty;
-                    updateGauges = _gaugesDirty;
-                    updateActivities = _activitiesDirty;
-                    _histogramsDirty = _gaugesDirty = _activitiesDirty = false;
-                }
+        private void OnUpdateTimerTick(object? sender, EventArgs e)
+        {
+            _updateTimer?.Stop();
 
-                if (!updateHistograms && !updateGauges && !updateActivities)
-                {
-                    return;
-                }
+            bool updateHistograms;
+            bool updateGauges;
+            bool updateActivities;
 
-                IReadOnlyCollection<HistogramStats>? histogramSnapshots = null;
-                IReadOnlyCollection<ObservableGaugeSnapshot>? gaugeSnapshots = null;
-                IReadOnlyList<ActivityTimelineViewModel.ActivityGroupViewModel>? activityGroups = null;
+            lock (_updateLock)
+            {
+                updateHistograms = _histogramsDirty;
+                updateGauges = _gaugesDirty;
+                updateActivities = _activitiesDirty;
+                _histogramsDirty = _gaugesDirty = _activitiesDirty = false;
+            }
 
-                if (updateHistograms)
-                {
-                    histogramSnapshots = _listener.HistogramSnapshots;
-                }
+            if (!updateHistograms && !updateGauges && !updateActivities)
+            {
+                return;
+            }
 
-                if (updateGauges)
-                {
-                    gaugeSnapshots = _listener.GaugeSnapshots;
-                }
+            // Capture snapshots outside of further dispatcher scheduling to keep timing predictable.
+            var histogramSnapshots = updateHistograms ? _listener.HistogramSnapshots : null;
+            var gaugeSnapshots = updateGauges ? _listener.GaugeSnapshots : null;
+            IReadOnlyList<ActivityTimelineViewModel.ActivityGroupViewModel>? activityGroups = null;
 
-                if (updateActivities && !Timeline.IsPaused)
-                {
-                    var activitySnapshots = _listener.ActivitySnapshots;
-                    activityGroups = Timeline.BuildGroups(activitySnapshots);
-                }
-                else
-                {
-                    updateActivities = false;
-                }
+            if (updateActivities && !Timeline.IsPaused)
+            {
+                var activitySnapshots = _listener.ActivitySnapshots;
+                activityGroups = Timeline.BuildGroups(activitySnapshots);
+            }
+            else
+            {
+                updateActivities = false;
+            }
 
-                if (token.IsCancellationRequested)
-                {
-                    return;
-                }
+            if (updateHistograms && histogramSnapshots is not null)
+            {
+                SynchronizeHistograms(histogramSnapshots);
+            }
 
-                var histData = histogramSnapshots;
-                var gaugeData = gaugeSnapshots;
-                var activityData = activityGroups;
-                var shouldUpdateHistograms = updateHistograms;
-                var shouldUpdateGauges = updateGauges;
-                var shouldUpdateActivities = updateActivities;
+            if (updateGauges && gaugeSnapshots is not null)
+            {
+                SynchronizeGauges(gaugeSnapshots);
+            }
 
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (token.IsCancellationRequested)
-                    {
-                        return;
-                    }
-
-                    if (shouldUpdateHistograms && histData is not null)
-                    {
-                        SynchronizeHistograms(histData);
-                    }
-
-                    if (shouldUpdateGauges && gaugeData is not null)
-                    {
-                        SynchronizeGauges(gaugeData);
-                    }
-
-                    if (shouldUpdateActivities && activityData is not null)
-                    {
-                        Timeline.ApplyGroups(activityData);
-                    }
-                }, DispatcherPriority.Background);
-            }, token);
+            if (updateActivities && activityGroups is not null)
+            {
+                Timeline.ApplyGroups(activityGroups);
+            }
         }
 
         private void ClearMetrics()
@@ -366,24 +337,5 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             Activities
         }
 
-        private sealed class DelegateCommand : ICommand
-        {
-            private readonly Action _execute;
-            private readonly Func<bool>? _canExecute;
-
-            public DelegateCommand(Action execute, Func<bool>? canExecute = null)
-            {
-                _execute = execute;
-                _canExecute = canExecute;
-            }
-
-            public event EventHandler? CanExecuteChanged;
-
-            public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
-
-            public void Execute(object? parameter) => _execute();
-
-            public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
-        }
     }
 }

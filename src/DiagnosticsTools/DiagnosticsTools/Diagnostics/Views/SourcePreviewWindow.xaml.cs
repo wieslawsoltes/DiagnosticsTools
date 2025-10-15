@@ -121,7 +121,8 @@ namespace Avalonia.Diagnostics.Views
                     _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 }
 
-                _viewModel = change.GetNewValue<SourcePreviewViewModel?>();
+                var newValue = change.GetNewValue<object?>();
+                _viewModel = newValue as SourcePreviewViewModel;
 
                 if (_viewModel is not null)
                 {

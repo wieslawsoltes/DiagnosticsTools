@@ -5,6 +5,7 @@
              xmlns:ctrl="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.MetricsPageView"
              x:DataType="metrics:MetricsPageViewModel"
+             x:CompileBindings="True"
              Margin="16">
   <UserControl.Resources>
     <conv:MetricBrushConverter x:Key="HistogramStrokeBrushConverter"
