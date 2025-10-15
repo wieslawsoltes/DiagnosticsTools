@@ -1,0 +1,61 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+        x:Class="Avalonia.Diagnostics.Views.SourcePreviewWindow"
+        x:DataType="viewModels:SourcePreviewViewModel"
+        Title="Source Preview"
+  Width="720"
+  Height="520"
+  MinWidth="480"
+  MinHeight="320"
+  SizeToContent="Manual"
+  WindowStartupLocation="CenterOwner"
+  CanResize="True">
+  <Window.Styles>
+    <Style Selector="TextBox.preview">
+      <Setter Property="FontFamily" Value="Consolas, Courier New, Menlo, monospace" />
+      <Setter Property="FontSize" Value="12" />
+  <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+  <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="AcceptsReturn" Value="True" />
+      <Setter Property="AcceptsTab" Value="True" />
+      <Setter Property="SelectionBrush" Value="{DynamicResource ThemeAccentBrush}" />
+      <Setter Property="SelectionForegroundBrush" Value="{DynamicResource ThemeForegroundBrush}" />
+    </Style>
+  </Window.Styles>
+  <DockPanel Margin="12" LastChildFill="True">
+    <StackPanel DockPanel.Dock="Top" Spacing="4">
+      <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="16" />
+      <TextBlock Text="{Binding LocationSummary}" FontStyle="Italic" />
+      <TextBlock Text="Loading source..."
+                 Foreground="{DynamicResource ThemeAccentBrush}"
+                 IsVisible="{Binding IsLoading}" />
+      <Border Background="{DynamicResource ThemeAccentBrush}" Padding="4" CornerRadius="4"
+              IsVisible="{Binding HasError}">
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="White" />
+      </Border>
+    </StackPanel>
+
+    <Border BorderBrush="{DynamicResource ThemeBorderMidBrush}" BorderThickness="1" Margin="0 8">
+      <ScrollViewer>
+        <TextBox Classes="preview"
+                 x:Name="SnippetTextBox"
+                 Text="{Binding Snippet}"
+                 IsVisible="{Binding HasSnippet}" />
+      </ScrollViewer>
+    </Border>
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Open"
+              Click="OpenClick" />
+      <Button Content="Copy snippet"
+              Click="CopySnippetClick"
+              IsEnabled="{Binding HasSnippet}" />
+      <Button Content="Copy path"
+              Click="CopyPathClick" />
+      <Button Content="Close"
+              Click="CloseClick" />
+    </StackPanel>
+  </DockPanel>
+</Window>

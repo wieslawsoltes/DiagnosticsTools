@@ -19,8 +19,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _isVisible;
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
-        private SourceInfo? _sourceInfo;
-        private Task? _sourceInfoTask;
+    private SourceInfo? _sourceInfo;
+    private Task<SourceInfo?>? _sourceInfoTask;
 
         public ValueFrameViewModel(
             StyledElement styledElement,
@@ -116,6 +116,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 RaisePropertyChanged(nameof(SourceSummary));
                 RaisePropertyChanged(nameof(HasSource));
                 RaisePropertyChanged(nameof(CanNavigateToSource));
+                RaisePropertyChanged(nameof(CanPreviewSource));
             }
         }
 
@@ -123,23 +124,49 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool HasSource => SourceInfo is not null;
 
-        public bool CanNavigateToSource => SourceInfo is not null;
+    public bool CanNavigateToSource => SourceInfo is not null;
+
+    public bool CanPreviewSource => SourceInfo is not null;
+
+    internal event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
 
         public async void NavigateToSource()
         {
             try
             {
-                await LoadSourceInfoAsync().ConfigureAwait(false);
-                if (SourceInfo is null)
+                var info = await LoadSourceInfoAsync().ConfigureAwait(false);
+                if (info is null)
                 {
                     return;
                 }
 
-                await _sourceNavigator.NavigateAsync(SourceInfo).ConfigureAwait(false);
+                await _sourceNavigator.NavigateAsync(info).ConfigureAwait(false);
             }
             catch
             {
                 // Navigation failures are non-fatal.
+            }
+        }
+
+        public async void PreviewSource()
+        {
+            try
+            {
+                var info = await LoadSourceInfoAsync().ConfigureAwait(false);
+                if (info is null)
+                {
+                    return;
+                }
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    var preview = new SourcePreviewViewModel(info, _sourceNavigator);
+                    SourcePreviewRequested?.Invoke(this, preview);
+                });
+            }
+            catch
+            {
+                // Preview failures are non-fatal.
             }
         }
 
@@ -231,7 +258,7 @@ namespace Avalonia.Diagnostics.ViewModels
             return null;
         }
 
-        private Task LoadSourceInfoAsync()
+        private Task<SourceInfo?> LoadSourceInfoAsync()
         {
             var existing = _sourceInfoTask;
             if (existing is not null)
@@ -239,16 +266,18 @@ namespace Avalonia.Diagnostics.ViewModels
                 return existing;
             }
 
-            async Task ResolveAsync()
+            async Task<SourceInfo?> ResolveAsync()
             {
                 try
                 {
                     var info = await _sourceInfoService.GetForValueFrameAsync(_valueFrame).ConfigureAwait(false);
                     await Dispatcher.UIThread.InvokeAsync(() => SourceInfo = info);
+                    return info;
                 }
                 catch
                 {
                     // Ignore resolution failures.
+                    return null;
                 }
             }
 

@@ -4,6 +4,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="DiagnosticsToolsSample.MainWindow"
+        Width="800" Height="600" 
+        WindowStartupLocation="CenterScreen"
         Title="DiagnosticsToolsSample">
 <Grid>
     <StackPanel Margin="10,10,-10,0" HorizontalAlignment="Center" VerticalAlignment="Center">

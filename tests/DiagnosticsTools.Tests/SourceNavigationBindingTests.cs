@@ -12,7 +12,7 @@ namespace DiagnosticsTools.Tests
 {
     public sealed class SourceNavigationBindingTests
     {
-    [AvaloniaFact]
+        [AvaloniaFact]
     public async Task TreePageViewModel_populates_source_info_for_selected_node()
         {
             var root = new StackPanel { Name = "RootPanel" };
@@ -48,6 +48,7 @@ namespace DiagnosticsTools.Tests
 
             Assert.True(treeViewModel.HasSelectedNodeSource);
             Assert.True(treeViewModel.CanNavigateToSource);
+            Assert.True(treeViewModel.CanPreviewSource);
             Assert.Equal(sourceInfo, treeViewModel.SelectedNodeSourceInfo);
             Assert.Equal(sourceInfo, childNode.SourceInfo);
             Assert.True(childNode.HasSource);
@@ -93,6 +94,51 @@ namespace DiagnosticsTools.Tests
             Assert.Equal(sourceInfo, navigator.LastNavigation);
         }
 
+        [AvaloniaFact]
+        public async Task TreePageViewModel_preview_command_raises_event()
+        {
+            var root = new StackPanel { Name = "RootPanel" };
+            var child = new Button { Name = "ChildButton" };
+            root.Children.Add(child);
+
+            var sourceInfo = new SourceInfo(
+                LocalPath: "/tmp/MainWindow.axaml",
+                RemoteUri: null,
+                StartLine: 18,
+                StartColumn: 7,
+                EndLine: null,
+                EndColumn: null,
+                Origin: SourceOrigin.Local);
+
+            var infoService = new DelegatingSourceInfoService(
+                objectResolver: obj => ReferenceEquals(obj, child) ? sourceInfo : null);
+            var navigator = new StubSourceNavigator();
+
+            using var mainViewModel = new MainViewModel(root, infoService, navigator);
+            using var treeViewModel = new TreePageViewModel(
+                mainViewModel,
+                VisualTreeNode.Create(root),
+                new HashSet<string>(),
+                infoService,
+                navigator);
+
+            var previewTcs = new TaskCompletionSource<SourcePreviewViewModel?>();
+            treeViewModel.SourcePreviewRequested += (_, preview) => previewTcs.TrySetResult(preview);
+
+            var rootNode = Assert.Single(treeViewModel.Nodes);
+            var childNode = Assert.Single(rootNode.Children);
+
+            treeViewModel.SelectedNode = childNode;
+            await WaitForAsync(() => treeViewModel.HasSelectedNodeSource);
+
+            treeViewModel.PreviewSource();
+
+            var preview = await WaitForResultAsync(previewTcs.Task);
+
+            Assert.NotNull(preview);
+            Assert.Equal(sourceInfo, preview!.SourceInfo);
+        }
+
         private sealed class RecordingSourceNavigator : ISourceNavigator
         {
             public SourceInfo? LastNavigation { get; private set; }
@@ -117,6 +163,18 @@ namespace DiagnosticsTools.Tests
 
                 await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             }
+        }
+
+        private static async Task<T?> WaitForResultAsync<T>(Task<T> task, TimeSpan? timeout = null)
+        {
+            var effectiveTimeout = timeout ?? TimeSpan.FromMilliseconds(500);
+            var completedTask = await Task.WhenAny(task, Task.Delay(effectiveTimeout));
+            if (completedTask != task)
+            {
+                return default;
+            }
+
+            return await task;
         }
     }
 }

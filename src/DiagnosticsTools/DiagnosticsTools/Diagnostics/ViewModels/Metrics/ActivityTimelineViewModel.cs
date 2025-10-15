@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using Avalonia.Diagnostics.Metrics;
-using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.ViewModels.Metrics
 {
@@ -52,50 +51,68 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
 
         public void Clear()
         {
-            _groups.Clear();
+            lock (_sync)
+            {
+                _groups.Clear();
+            }
         }
 
-        public void Update(IReadOnlyDictionary<string, IReadOnlyCollection<ActivitySample>> snapshots)
+        public IReadOnlyList<ActivityGroupViewModel> BuildGroups(IReadOnlyDictionary<string, IReadOnlyCollection<ActivitySample>> snapshots)
         {
-            if (IsPaused)
+            if (IsPaused || snapshots.Count == 0)
             {
-                return;
+                return Array.Empty<ActivityGroupViewModel>();
             }
 
+            var filter = Filter;
+            var minimumDuration = MinimumDuration;
+
+            var groups = new List<ActivityGroupViewModel>();
+
+            foreach (var pair in snapshots.OrderBy(x => x.Key))
+            {
+                var items = pair.Value
+                    .Where(sample => MatchesFilter(sample, filter, minimumDuration))
+                    .Select(sample => new ActivityItemViewModel(sample))
+                    .ToList();
+
+                if (items.Count == 0)
+                {
+                    continue;
+                }
+
+                groups.Add(new ActivityGroupViewModel(pair.Key, items));
+            }
+
+            return groups;
+        }
+
+        public void ApplyGroups(IReadOnlyList<ActivityGroupViewModel> groups)
+        {
             lock (_sync)
             {
                 _groups.Clear();
 
-                foreach (var pair in snapshots.OrderBy(x => x.Key))
+                for (var i = 0; i < groups.Count; i++)
                 {
-                    var items = pair.Value
-                        .Where(MatchesFilter)
-                        .Select(sample => new ActivityItemViewModel(sample))
-                        .ToList();
-
-                    if (items.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    _groups.Add(new ActivityGroupViewModel(pair.Key, items));
+                    _groups.Add(groups[i]);
                 }
             }
         }
 
-        private bool MatchesFilter(ActivitySample sample)
+        private static bool MatchesFilter(ActivitySample sample, string? filter, TimeSpan minimumDuration)
         {
-            if (sample.Duration < MinimumDuration)
+            if (sample.Duration < minimumDuration)
             {
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(Filter))
+            if (string.IsNullOrWhiteSpace(filter))
             {
                 return true;
             }
 
-            return sample.Name.IndexOf(Filter, StringComparison.OrdinalIgnoreCase) >= 0;
+            return sample.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         internal sealed class ActivityGroupViewModel

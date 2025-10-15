@@ -66,9 +66,15 @@ namespace Avalonia.Diagnostics.Views
             if (change.Property == DataContextProperty)
             {
                 if (change.GetOldValue<object?>() is TreePageViewModel oldViewModel)
+                {
                     oldViewModel.ClipboardCopyRequested -= OnClipboardCopyRequested;
+                    oldViewModel.SourcePreviewRequested -= OnSourcePreviewRequested;
+                }
                 if (change.GetNewValue<object?>() is TreePageViewModel newViewModel)
+                {
                     newViewModel.ClipboardCopyRequested += OnClipboardCopyRequested;
+                    newViewModel.SourcePreviewRequested += OnSourcePreviewRequested;
+                }
             }
         }
 
@@ -113,6 +119,11 @@ namespace Avalonia.Diagnostics.Views
                 }
             }
             return sb.ToString();
+        }
+
+        private void OnSourcePreviewRequested(object? sender, SourcePreviewViewModel e)
+        {
+            SourcePreviewWindow.Show(TopLevel.GetTopLevel(this), e);
         }
     }
 }

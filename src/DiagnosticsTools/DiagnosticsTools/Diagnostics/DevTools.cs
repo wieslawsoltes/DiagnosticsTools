@@ -145,11 +145,16 @@ namespace Avalonia.Diagnostics
             s_open.Remove((IDevToolsTopLevelGroup)window.Tag!);
         }
 
+        internal static bool IsDevToolsWindow(TopLevel topLevel)
+        {
+            return topLevel is Views.MainWindow or Views.SourcePreviewWindow;
+        }
+
         internal static bool DoesBelongToDevTool(this Visual v)
         {
             var topLevel = TopLevel.GetTopLevel(v);
 
-            while (topLevel is not null && topLevel is not Views.MainWindow)
+            while (topLevel is not null && !IsDevToolsWindow(topLevel))
             {
                 if (topLevel is Avalonia.Controls.Primitives.PopupRoot pr)
                 {

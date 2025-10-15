@@ -1,6 +1,7 @@
 using System;
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Diagnostics;
 using Avalonia.LogicalTree;
 using Lifetimes = Avalonia.Controls.ApplicationLifetimes;
 using System.Linq;
@@ -71,7 +72,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 for (var i = 0; i < _group.Items.Count; i++)
                 {
                     var window = _group.Items[i];
-                    if (window is Views.MainWindow)
+                    if (DevTools.IsDevToolsWindow(window))
                     {
                         continue;
                     }
@@ -79,7 +80,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
                 void GroupOnAdded(object? sender, TopLevel e)
                 {
-                    if (e is Views.MainWindow)
+                    if (DevTools.IsDevToolsWindow(e))
                     {
                         return;
                     }
@@ -88,7 +89,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
                 void GroupOnRemoved(object? sender, TopLevel e)
                 {
-                    if (e is Views.MainWindow)
+                    if (DevTools.IsDevToolsWindow(e))
                     {
                         return;
                     }

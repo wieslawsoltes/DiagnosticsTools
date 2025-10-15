@@ -85,6 +85,9 @@
       </virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
       <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
         <MenuFlyout>
+          <MenuItem Header="Preview source"
+                    Command="{Binding PreviewSource}"
+                    IsEnabled="{Binding CanPreviewSource}" />
           <MenuItem Header="Navigate to source"
                     Command="{Binding NavigateToSource}"
                     IsEnabled="{Binding CanNavigateToSource}" />

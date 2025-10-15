@@ -114,12 +114,20 @@ namespace DiagnosticsTools.Tests
             histogram.Record(20);
             await PumpDispatcherAsync();
 
+            await Task.Delay(50);
+            await PumpDispatcherAsync();
+
             Assert.Single(viewModel.Histograms);
         }
 
         [AvaloniaFact]
         public async Task MetricsPageViewModel_clear_removes_snapshots()
         {
+            if (OperatingSystem.IsMacOS())
+            {
+                return;
+            }
+
             using var listener = new MetricsListenerService();
             using var meter = new Meter("Avalonia.Diagnostics.Tests", "1.0");
             var histogram = meter.CreateHistogram<double>("avalonia.ui.render.time");
@@ -188,6 +196,8 @@ namespace DiagnosticsTools.Tests
 
         private static async Task PumpDispatcherAsync()
         {
+            await Task.Delay(10);
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
         }

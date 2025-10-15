@@ -169,7 +169,7 @@
         </Grid>
 
         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
-          <ItemsControl ItemsSource="{Binding AppliedFrames}" >
+          <ItemsControl ItemsSource="{Binding AppliedFrames}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border BorderThickness="0,0,0,1" BorderBrush="#6C6C6C" Opacity="{Binding IsActive, Converter={StaticResource BoolToOpacity}}">
@@ -183,7 +183,11 @@
                       <Binding Path="IsVisible" />
                     </MultiBinding>
                   </Border.IsVisible>
-                  <Expander IsExpanded="True" Margin="0" Padding="8,0" ContentTransition="{x:Null}" >
+                  <Expander IsExpanded="True"
+                            Margin="0"
+                            Padding="8,0"
+                            ContentTransition="{x:Null}"
+                            HorizontalAlignment="Stretch">
                     <Expander.Header>
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="{Binding Description}" />
@@ -194,6 +198,10 @@
                                 IsEnabled="{Binding CanNavigateToSource}"
                                 ToolTip.Tip="{Binding SourceSummary}"
                                 IsVisible="{Binding SourceInfo, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+      <Button Content="Preview"
+        Command="{Binding PreviewSource}"
+        IsEnabled="{Binding CanPreviewSource}"
+        IsVisible="{Binding SourceInfo, Converter={x:Static ObjectConverters.IsNotNull}}"/>
                       </StackPanel>
                     </Expander.Header>
 
@@ -307,7 +315,9 @@
           </ItemsControl>
         </ScrollViewer>
 
-        <Expander Header="Pseudo Classes" Grid.Row="2">
+  <Expander Header="Pseudo Classes"
+      Grid.Row="2"
+      HorizontalAlignment="Stretch">
           <ItemsControl ItemsSource="{Binding PseudoClasses}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>

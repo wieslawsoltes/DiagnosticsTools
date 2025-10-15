@@ -51,7 +51,8 @@ namespace Avalonia.Diagnostics.ViewModels
             TreeFilter.RefreshFilter += (s, e) => ApplyTreeFilter();
         }
 
-        public event EventHandler<string>? ClipboardCopyRequested;
+    public event EventHandler<string>? ClipboardCopyRequested;
+    public event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
 
         public MainViewModel MainView { get; }
 
@@ -106,6 +107,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     Details?.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
                     RaisePropertyChanged(nameof(CanScopeToSubTree));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
+                    RaisePropertyChanged(nameof(CanPreviewSource));
                     SelectedNodeSourceInfo = null;
                     _ = UpdateSelectedNodeSourceInfoAsync(value);
                 }
@@ -122,6 +124,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(SelectedNodeSourceSummary));
                     RaisePropertyChanged(nameof(HasSelectedNodeSource));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
+                    RaisePropertyChanged(nameof(CanPreviewSource));
                 }
             }
         }
@@ -132,6 +135,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
     public bool CanNavigateToSource => HasSelectedNodeSource;
 
+        public bool CanPreviewSource => HasSelectedNodeSource;
+
         public ControlDetailsViewModel? Details
         {
             get => _details;
@@ -141,7 +146,16 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 if (RaiseAndSetIfChanged(ref _details, value))
                 {
-                    oldValue?.Dispose();
+                    if (oldValue is not null)
+                    {
+                        oldValue.SourcePreviewRequested -= OnDetailsSourcePreviewRequested;
+                        oldValue.Dispose();
+                    }
+
+                    if (value is not null)
+                    {
+                        value.SourcePreviewRequested += OnDetailsSourcePreviewRequested;
+                    }
                 }
             }
         }
@@ -153,7 +167,11 @@ namespace Avalonia.Diagnostics.ViewModels
                 node.Dispose();
             }
 
-            _details?.Dispose();
+            if (_details is not null)
+            {
+                _details.SourcePreviewRequested -= OnDetailsSourcePreviewRequested;
+                _details.Dispose();
+            }
         }
 
         public async void NavigateToSource()
@@ -177,6 +195,34 @@ namespace Avalonia.Diagnostics.ViewModels
             catch
             {
                 // Navigation is best-effort.
+            }
+        }
+        
+        public async void PreviewSource()
+        {
+            var node = SelectedNode;
+            if (node is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                if (info is null)
+                {
+                    return;
+                }
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    var preview = new SourcePreviewViewModel(info, _sourceNavigator);
+                    SourcePreviewRequested?.Invoke(this, preview);
+                });
+            }
+            catch
+            {
+                // Preview is best-effort.
             }
         }
 
@@ -469,6 +515,11 @@ namespace Avalonia.Diagnostics.ViewModels
                     stack.Push(child);
                 }
             }
+        }
+
+        private void OnDetailsSourcePreviewRequested(object? sender, SourcePreviewViewModel e)
+        {
+            SourcePreviewRequested?.Invoke(this, e);
         }
 
         internal void RestoreScope(TreeNode? scoped)

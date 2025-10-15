@@ -9,6 +9,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Reactive;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using Avalonia.Diagnostics;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -478,7 +479,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 for (var i = 0; i < items.Count; i++)
                 {
                     var item = items[i];
-                    if (item is Views.MainWindow)
+                    if (DevTools.IsDevToolsWindow(item))
                     {
                         continue;
                     }
@@ -492,7 +493,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             private void OnGroupAdded(object? sender, TopLevel topLevel)
             {
-                if (topLevel is Views.MainWindow)
+                if (DevTools.IsDevToolsWindow(topLevel))
                 {
                     return;
                 }
@@ -502,7 +503,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             private void OnGroupRemoved(object? sender, TopLevel topLevel)
             {
-                if (topLevel is Views.MainWindow)
+                if (DevTools.IsDevToolsWindow(topLevel))
                 {
                     return;
                 }

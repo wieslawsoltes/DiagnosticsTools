@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Diagnostics.Metrics;
 using Avalonia.Threading;
@@ -24,9 +26,9 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         private bool _histogramsDirty;
         private bool _gaugesDirty;
         private bool _activitiesDirty;
-        private bool _updateScheduled;
         private readonly TimeSpan _throttleInterval;
         private bool _isCapturePaused;
+        private CancellationTokenSource? _updateCts;
 
         public MetricsPageViewModel(MetricsListenerService listener, TimeSpan? throttleInterval = null)
         {
@@ -87,6 +89,16 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
             _listener.MetricsUpdated -= OnHistogramsDirty;
             _listener.GaugesUpdated -= OnGaugesDirty;
             _listener.ActivitiesUpdated -= OnActivitiesDirty;
+
+            CancellationTokenSource? cts;
+            lock (_updateLock)
+            {
+                cts = _updateCts;
+                _updateCts = null;
+            }
+
+            cts?.Cancel();
+            cts?.Dispose();
         }
 
         private void OnHistogramsDirty(object? sender, EventArgs e)
@@ -137,45 +149,107 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
                         break;
                 }
 
-                if (_updateScheduled)
+                var previous = _updateCts;
+                previous?.Cancel();
+
+                var cts = new CancellationTokenSource();
+                _updateCts = cts;
+
+                ScheduleUpdate(cts.Token);
+
+                previous?.Dispose();
+            }
+        }
+
+        private void ScheduleUpdate(CancellationToken token)
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(_throttleInterval, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
                 {
                     return;
                 }
 
-                _updateScheduled = true;
-                DispatcherTimer.RunOnce(ProcessPendingUpdates, _throttleInterval);
-            }
-        }
+                bool updateHistograms;
+                bool updateGauges;
+                bool updateActivities;
 
-        private void ProcessPendingUpdates()
-        {
-            bool updateHistograms;
-            bool updateGauges;
-            bool updateActivities;
+                lock (_updateLock)
+                {
+                    updateHistograms = _histogramsDirty;
+                    updateGauges = _gaugesDirty;
+                    updateActivities = _activitiesDirty;
+                    _histogramsDirty = _gaugesDirty = _activitiesDirty = false;
+                }
 
-            lock (_updateLock)
-            {
-                updateHistograms = _histogramsDirty;
-                updateGauges = _gaugesDirty;
-                updateActivities = _activitiesDirty;
-                _histogramsDirty = _gaugesDirty = _activitiesDirty = false;
-                _updateScheduled = false;
-            }
+                if (!updateHistograms && !updateGauges && !updateActivities)
+                {
+                    return;
+                }
 
-            if (updateHistograms)
-            {
-                SynchronizeHistograms(_listener.HistogramSnapshots);
-            }
+                IReadOnlyCollection<HistogramStats>? histogramSnapshots = null;
+                IReadOnlyCollection<ObservableGaugeSnapshot>? gaugeSnapshots = null;
+                IReadOnlyList<ActivityTimelineViewModel.ActivityGroupViewModel>? activityGroups = null;
 
-            if (updateGauges)
-            {
-                SynchronizeGauges(_listener.GaugeSnapshots);
-            }
+                if (updateHistograms)
+                {
+                    histogramSnapshots = _listener.HistogramSnapshots;
+                }
 
-            if (updateActivities)
-            {
-                Timeline.Update(_listener.ActivitySnapshots);
-            }
+                if (updateGauges)
+                {
+                    gaugeSnapshots = _listener.GaugeSnapshots;
+                }
+
+                if (updateActivities && !Timeline.IsPaused)
+                {
+                    var activitySnapshots = _listener.ActivitySnapshots;
+                    activityGroups = Timeline.BuildGroups(activitySnapshots);
+                }
+                else
+                {
+                    updateActivities = false;
+                }
+
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                var histData = histogramSnapshots;
+                var gaugeData = gaugeSnapshots;
+                var activityData = activityGroups;
+                var shouldUpdateHistograms = updateHistograms;
+                var shouldUpdateGauges = updateGauges;
+                var shouldUpdateActivities = updateActivities;
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    if (shouldUpdateHistograms && histData is not null)
+                    {
+                        SynchronizeHistograms(histData);
+                    }
+
+                    if (shouldUpdateGauges && gaugeData is not null)
+                    {
+                        SynchronizeGauges(gaugeData);
+                    }
+
+                    if (shouldUpdateActivities && activityData is not null)
+                    {
+                        Timeline.ApplyGroups(activityData);
+                    }
+                }, DispatcherPriority.Background);
+            }, token);
         }
 
         private void ClearMetrics()

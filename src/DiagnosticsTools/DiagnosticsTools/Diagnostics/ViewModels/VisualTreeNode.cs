@@ -1,6 +1,7 @@
 using System;
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Diagnostics;
 using Avalonia.Controls.Diagnostics;
 using Avalonia.Controls.Primitives;
 using Avalonia.Styling;
@@ -194,7 +195,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     for (int i = 0; i < classic.Windows.Count; i++)
                     {
                         var window = classic.Windows[i];
-                        if (window is Views.MainWindow)
+                        if (DevTools.IsDevToolsWindow(window))
                         {
                             continue;
                         }
@@ -204,7 +205,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     {
                         Window.WindowOpenedEvent.AddClassHandler(typeof(Window), (s,e)=>
                             {
-                                if (s is Views.MainWindow)
+                                if (s is Window window && DevTools.IsDevToolsWindow(window))
                                 {
                                     return;
                                 }
@@ -212,7 +213,7 @@ namespace Avalonia.Diagnostics.ViewModels
                             }),
                         Window.WindowClosedEvent.AddClassHandler(typeof(Window), (s,e)=>
                             {
-                                if (s is Views.MainWindow)
+                                if (s is Window window && DevTools.IsDevToolsWindow(window))
                                 {
                                     return;
                                 }

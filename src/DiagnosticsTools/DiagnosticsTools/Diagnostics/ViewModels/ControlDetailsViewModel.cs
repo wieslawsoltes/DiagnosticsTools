@@ -85,14 +85,18 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 foreach (var appliedStyle in styleDiagnostics.AppliedFrames.OrderBy(s => s.Priority))
                 {
-                    AppliedFrames.Add(new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator));
+                    var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator);
+                    frame.SourcePreviewRequested += OnValueFramePreviewRequested;
+                    AppliedFrames.Add(frame);
                 }
 
                 UpdateStyles();
             }
         }
 
-        public bool CanNavigateToParentProperty => _selectedEntitiesStack.Count >= 1;
+    public bool CanNavigateToParentProperty => _selectedEntitiesStack.Count >= 1;
+
+    public event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
 
         public TreePageViewModel TreePage { get; }
 
@@ -217,6 +221,11 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 se.Classes.RemoveListener(this);
             }
+
+            foreach (var frame in AppliedFrames)
+            {
+                frame.SourcePreviewRequested -= OnValueFramePreviewRequested;
+            }
         }
 
         private static IEnumerable<PropertyViewModel> GetAvaloniaProperties(object o)
@@ -257,6 +266,11 @@ namespace Avalonia.Diagnostics.ViewModels
             return t.GetProperties()
                 .Where(x => x.GetIndexParameters().Length == 0)
                 .Select(x => new ClrPropertyViewModel(o, x));
+        }
+
+        private void OnValueFramePreviewRequested(object? sender, SourcePreviewViewModel e)
+        {
+            SourcePreviewRequested?.Invoke(this, e);
         }
 
         private void ControlPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
