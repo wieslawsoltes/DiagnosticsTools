@@ -43,16 +43,32 @@
       <ColumnDefinition Width="320" lb:ColumnDefinition.IsVisible="{Binding Layout, Converter={x:Static ObjectConverters.IsNotNull}}" />
     </Grid.ColumnDefinitions>
     
-    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
+    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,*">
 
-      <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto, Auto">
         <Button Grid.Column="0" Grid.RowSpan="2" Content="^" 
                 IsEnabled="{Binding CanNavigateToParentProperty}"
                 Margin="0 0 4 0"
                 ToolTip.Tip="Navigate to parent property"
                 Command="{Binding NavigateToParentProperty}" />
-        <TextBlock Grid.Column="1" Grid.Row="0" Text="{Binding SelectedEntityName}" FontWeight="Bold" />
-        <TextBlock Grid.Column="1" Grid.Row="1" Text="{Binding SelectedEntityType}" FontStyle="Italic" />
+        <TextBlock Grid.Column="1" Grid.ColumnSpan="3" Grid.Row="0" Text="{Binding SelectedEntityName}" FontWeight="Bold" />
+        <TextBlock Grid.Column="1" Grid.ColumnSpan="3" Grid.Row="1" Text="{Binding SelectedEntityType}" FontStyle="Italic" />
+        <Button Grid.Column="2"
+                Grid.Row="0"
+                Content="Undo"
+                Margin="4 0 0 0"
+                Command="{Binding UndoMutationCommand}"
+                IsEnabled="{Binding CanUndoMutation}"
+                IsVisible="{Binding ShowMutationCommands}"
+                ToolTip.Tip="Undo last XAML update (Ctrl+Z)" />
+        <Button Grid.Column="3"
+                Grid.Row="0"
+                Content="Redo"
+                Margin="4 0 0 0"
+                Command="{Binding RedoMutationCommand}"
+                IsEnabled="{Binding CanRedoMutation}"
+                IsVisible="{Binding ShowMutationCommands}"
+                ToolTip.Tip="Redo XAML update (Ctrl+Shift+Z)" />
       </Grid>
       
       <controls:FilterTextBox Grid.Row="1"
@@ -63,11 +79,19 @@
                               UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
                               UseWholeWordFilter="{Binding UseWholeWordFilter}"
                               UseRegexFilter="{Binding UseRegexFilter}"/>
+
+      <TextBlock Grid.Row="2"
+                 Text="{Binding MutationStatusMessage}"
+                 Foreground="OrangeRed"
+                 FontWeight="SemiBold"
+                 TextWrapping="Wrap"
+                 Margin="0 4 0 4"
+                 IsVisible="{Binding HasMutationStatusMessage}"/>
       
       <DataGrid 
                 x:Name="DataGrid"
                 ItemsSource="{Binding PropertiesView}"
-                Grid.Row="2"
+                Grid.Row="3"
                 BorderThickness="0"
                 RowBackground="Transparent"
                 SelectedItem="{Binding SelectedProperty, Mode=TwoWay}"
@@ -206,6 +230,7 @@
                       </StackPanel>
                     </Expander.Header>
 
+                    <StackPanel>
                     <ItemsControl Margin="20,0,0,0" Grid.Row="1" ItemsSource="{Binding Setters}">
                       
                       <ItemsControl.Styles>
@@ -308,6 +333,11 @@
 
                       </ItemsControl.DataTemplates>
                     </ItemsControl>
+
+                    <controls:SourcePreviewEditor Margin="20,12,0,12"
+                                                 DataContext="{Binding InlinePreview}"
+                                                 IsVisible="{Binding ., Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </StackPanel>
 
                   </Expander>
                 </Border>

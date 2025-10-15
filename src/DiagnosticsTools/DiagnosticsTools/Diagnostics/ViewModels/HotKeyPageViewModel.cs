@@ -25,7 +25,9 @@ namespace Avalonia.Diagnostics.ViewModels
                 new(CreateDescription(hotKeys.ValueFramesUnfreeze), "Unfreeze Value Frames", "Resumes refreshing the Value Frames inspector for the selected Control"),
                 new(CreateDescription(hotKeys.InspectHoveredControl), "Inspect Control Under Pointer", "Inspects the hovered Control in the Logical or Visual Tree Page"),
                 new(CreateDescription(hotKeys.TogglePopupFreeze), "Toggle Popup Freeze", "Prevents visible Popups from closing so they can be inspected"),
-                new(CreateDescription(hotKeys.ScreenshotSelectedControl), "Screenshot Selected Control", "Saves a Screenshot of the Selected Control in the Logical or Visual Tree Page")
+                new(CreateDescription(hotKeys.ScreenshotSelectedControl), "Screenshot Selected Control", "Saves a Screenshot of the Selected Control in the Logical or Visual Tree Page"),
+                new(CreateDescription(hotKeys.UndoMutation), "Undo XAML Change", "Reverts the most recent property inspector edit applied to the source document."),
+                new(CreateDescription(hotKeys.RedoMutation), "Redo XAML Change", "Reapplies the last XAML mutation that was undone.")
             };
         }
 

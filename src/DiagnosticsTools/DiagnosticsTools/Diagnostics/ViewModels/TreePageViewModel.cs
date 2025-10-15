@@ -2,15 +2,21 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Diagnostics.Xaml;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Threading.Tasks;
+using System.Text;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -20,6 +26,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private ControlDetailsViewModel? _details;
         private TreeNode[] _nodes;
         private readonly TreeNode[] _rootNodes;
+        private readonly Dictionary<XamlAstNodeId, TreeNode> _nodesByXamlId = new();
+        private readonly XamlAstWorkspace _xamlAstWorkspace;
         private TreeNode? _scopedRoot;
         private string? _scopedNodeKey;
         private bool _isScoped;
@@ -29,15 +37,24 @@ namespace Avalonia.Diagnostics.ViewModels
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
         private SourceInfo? _selectedNodeSourceInfo;
+        private XamlAstSelection? _selectedNodeXaml;
         private readonly DelegateCommand _previewSourceCommand;
         private readonly DelegateCommand _navigateToSourceCommand;
+        private int _xamlSelectionRevision;
+        private PropertyInspectorChangeEmitter? _changeEmitter;
+
+        private static readonly StringComparer PathComparer =
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
 
         public TreePageViewModel(
             MainViewModel mainView,
             TreeNode[] nodes,
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
-            ISourceNavigator sourceNavigator)
+            ISourceNavigator sourceNavigator,
+            XamlAstWorkspace xamlAstWorkspace)
         {
             MainView = mainView;
             _rootNodes = nodes;
@@ -45,6 +62,9 @@ namespace Avalonia.Diagnostics.ViewModels
             _pinnedProperties = pinnedProperties;
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
+            _xamlAstWorkspace = xamlAstWorkspace ?? throw new ArgumentNullException(nameof(xamlAstWorkspace));
+            _changeEmitter = null;
+            _xamlAstWorkspace.DocumentChanged += OnXamlDocumentChanged;
             PropertiesFilter = new FilterViewModel();
             PropertiesFilter.RefreshFilter += (s, e) => Details?.PropertiesView?.Refresh();
 
@@ -109,6 +129,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     Details = value != null ?
                         new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator) :
                         null;
+                    _details?.AttachChangeEmitter(_changeEmitter);
                     Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
                     Details?.UpdateStyleFilters();
                     Details?.UpdateSourceNavigation(_sourceInfoService, _sourceNavigator);
@@ -117,6 +138,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(CanPreviewSource));
                     UpdateCommandStates();
                     SelectedNodeSourceInfo = null;
+                    SelectedNodeXaml = null;
                     _ = UpdateSelectedNodeSourceInfoAsync(value);
                 }
             }
@@ -146,6 +168,12 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool CanPreviewSource => HasSelectedNodeSource;
 
+        public XamlAstSelection? SelectedNodeXaml
+        {
+            get => _selectedNodeXaml;
+            private set => RaiseAndSetIfChanged(ref _selectedNodeXaml, value);
+        }
+
         public ICommand PreviewSourceCommand => _previewSourceCommand;
 
         public ICommand NavigateToSourceCommand => _navigateToSourceCommand;
@@ -173,12 +201,45 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
+        internal void AttachChangeEmitter(PropertyInspectorChangeEmitter? changeEmitter)
+        {
+            _changeEmitter = changeEmitter;
+            _details?.AttachChangeEmitter(changeEmitter);
+        }
+
+        internal void NotifyMutationCompleted(MutationCompletedEventArgs args)
+        {
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => NotifyMutationCompleted(args), DispatcherPriority.Background);
+                return;
+            }
+
+            if (_details is null)
+            {
+                return;
+            }
+
+            if (args.Result.Status == ChangeDispatchStatus.Success)
+            {
+                _details.HandleMutationSuccess(args);
+            }
+            else
+            {
+                _details.HandleMutationFailure(args);
+            }
+
+            _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+        }
+
         public void Dispose()
         {
             foreach (var node in Nodes)
             {
                 node.Dispose();
             }
+
+            _xamlAstWorkspace.DocumentChanged -= OnXamlDocumentChanged;
 
             if (_details is not null)
             {
@@ -237,14 +298,153 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     var context = node.Visual?.GetType().Name ?? node.Type;
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator)
-                        : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator);
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, mutationOwner: MainView)
+                        : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator, mutationOwner: MainView);
+                    var runtimePreview = BuildRuntimeSnapshot(node);
+                    if (runtimePreview is not null)
+                    {
+                        preview.RuntimeComparison = runtimePreview;
+                    }
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
             }
             catch
             {
                 // Preview is best-effort.
+            }
+        }
+
+        private SourcePreviewViewModel? BuildRuntimeSnapshot(TreeNode node)
+        {
+            var details = Details;
+            if (details is null)
+            {
+                return null;
+            }
+
+            var snippet = CreateRuntimeSnapshotSnippet(node, details);
+            if (string.IsNullOrEmpty(snippet))
+            {
+                return null;
+            }
+
+            var runtimeInfo = new SourceInfo("Runtime Snapshot", null, null, null, null, null, SourceOrigin.Generated);
+            var runtimePreview = new SourcePreviewViewModel(runtimeInfo, _sourceNavigator, mutationOwner: MainView);
+            runtimePreview.SetManualSnippet(snippet!);
+            return runtimePreview;
+        }
+
+        private static string? CreateRuntimeSnapshotSnippet(TreeNode node, ControlDetailsViewModel details)
+        {
+            if (details.AppliedFrames.Count == 0)
+            {
+                return null;
+            }
+
+            var builder = new StringBuilder();
+            builder.Append("Element: ");
+            builder.Append(node.Type);
+            if (!string.IsNullOrWhiteSpace(node.ElementName))
+            {
+                builder.Append(" \"");
+                builder.Append(node.ElementName);
+                builder.Append('"');
+            }
+            builder.AppendLine();
+
+            if (node.Visual is { } visual)
+            {
+                builder.AppendLine($"Runtime type: {visual.GetType().FullName}");
+
+                if (visual is Control control && control.DataContext is { } dataContext)
+                {
+                    builder.AppendLine($"DataContext: {FormatSimpleValue(dataContext)}");
+                }
+            }
+
+            builder.AppendLine();
+
+            var hasContent = false;
+
+            foreach (var frame in details.AppliedFrames)
+            {
+                var relevantSetters = frame.Setters.Where(s => s.IsVisible || s.IsActive).ToList();
+                if (!frame.IsActive && relevantSetters.Count == 0)
+                {
+                    continue;
+                }
+
+                hasContent = true;
+
+                var description = string.IsNullOrWhiteSpace(frame.Description) ? "Values" : frame.Description!;
+                builder.Append("Frame: ");
+                builder.Append(description);
+                builder.Append(frame.IsActive ? " (active)" : " (inactive)");
+                if (!frame.IsVisible)
+                {
+                    builder.Append(" [filtered]");
+                }
+                builder.AppendLine();
+
+                if (relevantSetters.Count == 0)
+                {
+                    builder.AppendLine("  (no visible setters)");
+                }
+                else
+                {
+                    foreach (var setter in relevantSetters)
+                    {
+                        var indicator = setter.IsActive ? '*' : '-';
+                        builder.Append("  ");
+                        builder.Append(indicator);
+                        builder.Append(' ');
+                        builder.Append(setter.Name);
+                        builder.Append(" = ");
+                        builder.Append(FormatSetterValue(setter));
+                        builder.AppendLine();
+                    }
+                }
+
+                builder.AppendLine();
+            }
+
+            if (!hasContent)
+            {
+                return null;
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private static string FormatSetterValue(SetterViewModel setter)
+        {
+            switch (setter)
+            {
+                case BindingSetterViewModel bindingSetter:
+                    return $"{bindingSetter.ValueTypeTooltip}: {bindingSetter.Path}";
+                case ResourceSetterViewModel resourceSetter:
+                    return $"{resourceSetter.ValueTypeTooltip}: {FormatSimpleValue(resourceSetter.Key)} -> {FormatSimpleValue(resourceSetter.Value)}";
+                default:
+                    return FormatSimpleValue(setter.Value);
+            }
+        }
+
+        private static string FormatSimpleValue(object? value)
+        {
+            switch (value)
+            {
+                case null:
+                    return "null";
+                case string s:
+                    return $"\"{s}\"";
+                case double d:
+                    return d.ToString("G", CultureInfo.InvariantCulture);
+                case float f:
+                    return f.ToString("G", CultureInfo.InvariantCulture);
+                case IFormattable formattable:
+                    return formattable.ToString(null, CultureInfo.InvariantCulture);
+                default:
+                    return value?.ToString() ?? string.Empty;
             }
         }
 
@@ -378,14 +578,30 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private async Task UpdateSelectedNodeSourceInfoAsync(TreeNode? node)
         {
-            if (node is null)
+            var revision = Interlocked.Increment(ref _xamlSelectionRevision);
+            SourceInfo? info = null;
+            XamlAstSelection? xamlSelection = null;
+
+            if (node is not null)
             {
-                await Dispatcher.UIThread.InvokeAsync(() => SelectedNodeSourceInfo = null);
-                return;
+                info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                xamlSelection = await BuildXamlSelectionAsync(node, info).ConfigureAwait(false);
             }
 
-            var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
-            await Dispatcher.UIThread.InvokeAsync(() => SelectedNodeSourceInfo = info);
+            var targetNode = node;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (revision == _xamlSelectionRevision)
+                {
+                    SelectedNodeSourceInfo = info;
+                    SelectedNodeXaml = xamlSelection;
+                    if (targetNode is not null)
+                    {
+                        RegisterXamlDescriptor(targetNode, xamlSelection?.Node);
+                    }
+                }
+            });
         }
 
         public void SelectControl(Control control)
@@ -601,6 +817,213 @@ namespace Avalonia.Diagnostics.ViewModels
         private void OnDetailsSourcePreviewRequested(object? sender, SourcePreviewViewModel e)
         {
             SourcePreviewRequested?.Invoke(this, e);
+        }
+
+        private void RegisterXamlDescriptor(TreeNode node, XamlAstNodeDescriptor? descriptor)
+        {
+            lock (_nodesByXamlId)
+            {
+                if (node.XamlDescriptor is { } existing &&
+                    _nodesByXamlId.TryGetValue(existing.Id, out var mapped) &&
+                    ReferenceEquals(mapped, node))
+                {
+                    _nodesByXamlId.Remove(existing.Id);
+                }
+
+                node.UpdateXamlDescriptor(descriptor);
+
+                if (descriptor is not null)
+                {
+                    _nodesByXamlId[descriptor.Id] = node;
+                }
+            }
+        }
+
+        private async Task<XamlAstSelection?> BuildXamlSelectionAsync(TreeNode node, SourceInfo? info)
+        {
+            if (info is null)
+            {
+                return null;
+            }
+
+            var path = info.LocalPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                var document = await _xamlAstWorkspace.GetDocumentAsync(path!).ConfigureAwait(false);
+                var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
+                var descriptor = ResolveDescriptor(index, node, info);
+                return new XamlAstSelection(document, descriptor);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int GetLineStart(XamlAstNodeDescriptor descriptor)
+        {
+            return Math.Max(descriptor.LineSpan.Start.Line, 1);
+        }
+
+        private static int GetLineEnd(XamlAstNodeDescriptor descriptor)
+        {
+            var start = GetLineStart(descriptor);
+            var end = descriptor.LineSpan.End.Line;
+            if (end < start)
+            {
+                end = start;
+            }
+
+            return Math.Max(end, start);
+        }
+
+        private XamlAstNodeDescriptor? ResolveDescriptor(IXamlAstIndex index, TreeNode node, SourceInfo? info)
+        {
+            XamlAstNodeDescriptor? descriptor = null;
+
+            if (info?.StartLine is int startLine && startLine > 0)
+            {
+                descriptor = index.Nodes
+                    .Where(d =>
+                    {
+                        var begin = GetLineStart(d);
+                        var end = GetLineEnd(d);
+                        return startLine >= begin && startLine <= end;
+                    })
+                    .OrderBy(d => GetLineEnd(d) - GetLineStart(d))
+                    .ThenBy(d => d.Path.Count)
+                    .FirstOrDefault();
+
+                if (descriptor is not null)
+                {
+                    return descriptor;
+                }
+            }
+
+            var elementName = node.ElementName ?? (node.Visual as INamed)?.Name;
+            if (!string.IsNullOrWhiteSpace(elementName))
+            {
+                var matches = index.FindByName(elementName!);
+                if (matches.Count == 1)
+                {
+                    return matches[0];
+                }
+
+                if (matches.Count > 1)
+                {
+                    var typeName = node.Visual?.GetType().Name ?? node.Type;
+                    descriptor = matches.FirstOrDefault(m => string.Equals(m.LocalName, typeName, StringComparison.Ordinal));
+                    if (descriptor is not null)
+                    {
+                        return descriptor;
+                    }
+                }
+            }
+
+            var fallbackType = node.Visual?.GetType().Name ?? node.Type;
+            descriptor = index.Nodes.FirstOrDefault(m => string.Equals(m.LocalName, fallbackType, StringComparison.Ordinal));
+            return descriptor;
+        }
+
+        private void OnXamlDocumentChanged(object? sender, XamlDocumentChangedEventArgs e)
+        {
+            if (SelectedNode is null)
+            {
+                return;
+            }
+
+            var currentPath = SelectedNodeSourceInfo?.LocalPath;
+            if (string.IsNullOrWhiteSpace(currentPath))
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(e.Path) || PathsEqual(currentPath!, e.Path))
+            {
+                _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+            }
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            try
+            {
+                left = Path.GetFullPath(left);
+                right = Path.GetFullPath(right);
+            }
+            catch
+            {
+                // If normalization fails, fall back to raw comparison.
+            }
+
+            return PathComparer.Equals(left, right);
+        }
+
+        private void NavigateToAstNode(XamlAstNodeDescriptor? descriptor)
+        {
+            if (descriptor is null)
+            {
+                return;
+            }
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                TreeNode? target;
+                lock (_nodesByXamlId)
+                {
+                    _nodesByXamlId.TryGetValue(descriptor.Id, out target);
+                }
+
+                if (target is null)
+                {
+                    return;
+                }
+
+                if (!IsNodeInScope(target))
+                {
+                    ShowFullTree();
+                }
+
+                if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+                {
+                    TreeFilter.FilterString = string.Empty;
+                }
+
+                ExpandNode(target.Parent);
+
+                if (!ReferenceEquals(target, SelectedNode))
+                {
+                    SelectedNode = target;
+                }
+
+                Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
+        }
+
+        private bool IsNodeInScope(TreeNode node)
+        {
+            if (!IsScoped || ScopedNode is null)
+            {
+                return true;
+            }
+
+            var current = node;
+            while (current is not null)
+            {
+                if (ReferenceEquals(current, ScopedNode))
+                {
+                    return true;
+                }
+
+                current = current.Parent;
+            }
+
+            return false;
         }
 
         private void UpdateCommandStates()
@@ -933,4 +1356,6 @@ namespace Avalonia.Diagnostics.ViewModels
             return string.Empty;
         }
     }
+
+    public sealed record XamlAstSelection(XamlAstDocument Document, XamlAstNodeDescriptor? Node);
 }

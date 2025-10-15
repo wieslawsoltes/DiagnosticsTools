@@ -28,5 +28,15 @@ namespace Avalonia.Diagnostics
         /// Saves a Screenshot of the Selected Control in the Logical or Visual Tree Page
         /// </summary>
         public KeyGesture ScreenshotSelectedControl { get; init; } = new(Key.F8);
+
+        /// <summary>
+        /// Undoes the most recent property inspector mutation applied to XAML.
+        /// </summary>
+        public KeyGesture UndoMutation { get; init; } = new(Key.Z, KeyModifiers.Control);
+
+        /// <summary>
+        /// Redoes the most recently undone property inspector mutation applied to XAML.
+        /// </summary>
+        public KeyGesture RedoMutation { get; init; } = new(Key.Z, KeyModifiers.Control | KeyModifiers.Shift);
     }
 }

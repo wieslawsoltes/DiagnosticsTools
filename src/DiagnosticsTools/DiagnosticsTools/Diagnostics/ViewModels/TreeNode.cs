@@ -5,6 +5,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
+using Avalonia.Diagnostics.Xaml;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
@@ -20,6 +21,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _isExpanded;
         private bool _isVisible = true;
         private SourceInfo? _sourceInfo;
+        private XamlAstNodeDescriptor? _xamlDescriptor;
 
         protected TreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customTypeName = null)
         {
@@ -143,6 +145,12 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
+        public XamlAstNodeDescriptor? XamlDescriptor
+        {
+            get => _xamlDescriptor;
+            private set => RaiseAndSetIfChanged(ref _xamlDescriptor, value);
+        }
+
         public string? SourceSummary => SourceInfo?.DisplayPath;
 
         public bool HasSource => SourceInfo is not null;
@@ -169,6 +177,11 @@ namespace Avalonia.Diagnostics.ViewModels
         internal void UpdateSourceInfo(SourceInfo? info)
         {
             SourceInfo = info;
+        }
+
+        internal void UpdateXamlDescriptor(XamlAstNodeDescriptor? descriptor)
+        {
+            XamlDescriptor = descriptor;
         }
     }
 }

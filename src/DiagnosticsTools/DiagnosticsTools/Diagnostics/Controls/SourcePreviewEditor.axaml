@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             xmlns:avaloniaedit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             x:Class="Avalonia.Diagnostics.Controls.SourcePreviewEditor"
+             x:DataType="viewModels:SourcePreviewViewModel"
+             x:CompileBindings="True">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+  </UserControl.Styles>
+
+  <avaloniaedit:TextEditor x:Name="SnippetTextEditor"
+                           IsReadOnly="True"
+                           ShowLineNumbers="True"
+                           WordWrap="False"
+                           HorizontalScrollBarVisibility="Auto"
+                           VerticalScrollBarVisibility="Auto"
+                           FontFamily="Consolas, Courier New, Menlo, monospace"
+                           FontSize="12"
+                           IsVisible="{Binding HasSnippet}" />
+</UserControl>

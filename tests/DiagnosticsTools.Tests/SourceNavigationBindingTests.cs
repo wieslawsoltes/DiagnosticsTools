@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels;
+using Avalonia.Diagnostics.Xaml;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Xunit;
@@ -33,12 +34,14 @@ namespace DiagnosticsTools.Tests
             var navigator = new StubSourceNavigator();
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
+            using var workspace = new XamlAstWorkspace();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
                 new HashSet<string>(),
                 infoService,
-                navigator);
+                navigator,
+                workspace);
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -75,12 +78,14 @@ namespace DiagnosticsTools.Tests
             var navigator = new RecordingSourceNavigator();
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
+            using var workspace = new XamlAstWorkspace();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
                 new HashSet<string>(),
                 infoService,
-                navigator);
+                navigator,
+                workspace);
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -115,12 +120,14 @@ namespace DiagnosticsTools.Tests
             var navigator = new StubSourceNavigator();
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
+            using var workspace = new XamlAstWorkspace();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
                 new HashSet<string>(),
                 infoService,
-                navigator);
+                navigator,
+                workspace);
 
             var previewTcs = new TaskCompletionSource<SourcePreviewViewModel?>();
             treeViewModel.SourcePreviewRequested += (_, preview) => previewTcs.TrySetResult(preview);

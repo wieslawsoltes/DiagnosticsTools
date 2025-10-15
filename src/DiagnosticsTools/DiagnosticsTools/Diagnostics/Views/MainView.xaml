@@ -56,6 +56,16 @@
           </MenuItem.Icon>
         </MenuItem>
       </MenuItem>
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Undo XAML Change"
+                  Command="{Binding UndoMutationCommand}"
+                  IsEnabled="{Binding CanUndoMutation}"
+                  HotKey="Ctrl+Z" />
+        <MenuItem Header="_Redo XAML Change"
+                  Command="{Binding RedoMutationCommand}"
+                  IsEnabled="{Binding CanRedoMutation}"
+                  HotKey="Ctrl+Shift+Z" />
+      </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="Control _Details">
           <MenuItem Header="Show Implemented Interfaces" Command="{Binding ToggleShowImplementedInterfaces}">

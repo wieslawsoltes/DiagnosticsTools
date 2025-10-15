@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Diagnostics.ViewModels;
+using Avalonia.Diagnostics.Xaml;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -79,7 +80,8 @@ namespace DiagnosticsTools.Tests
             var sourceNavigator = new StubSourceNavigator();
             using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator);
+            using var workspace = new XamlAstWorkspace();
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace);
 
             var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
             var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
@@ -103,7 +105,8 @@ namespace DiagnosticsTools.Tests
             var sourceNavigator = new StubSourceNavigator();
             using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator);
+            using var workspace = new XamlAstWorkspace();
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace);
 
             combinedTree.TreeFilter.FilterString = "Border";
 

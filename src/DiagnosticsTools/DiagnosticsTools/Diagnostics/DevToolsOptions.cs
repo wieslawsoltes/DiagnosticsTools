@@ -2,6 +2,7 @@
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Microsoft.CodeAnalysis;
 
 namespace Avalonia.Diagnostics
 {
@@ -73,5 +74,10 @@ namespace Avalonia.Diagnostics
         /// Gets or sets the navigator used to open resolved source locations.
         /// </summary>
         public ISourceNavigator? SourceNavigator { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Roslyn workspace used for XAML persistence and code navigation.
+        /// </summary>
+        public Workspace? RoslynWorkspace { get; set; }
     }
 }

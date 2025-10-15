@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
-        xmlns:avaloniaedit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+        xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
         x:Class="Avalonia.Diagnostics.Views.SourcePreviewWindow"
         x:DataType="viewModels:SourcePreviewViewModel"
         x:CompileBindings="True"
@@ -13,20 +13,13 @@
   SizeToContent="Manual"
   WindowStartupLocation="CenterOwner"
   CanResize="True">
-  <Window.Styles>
-    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
-    <Style Selector="TextBox.preview">
-      <Setter Property="FontFamily" Value="Consolas, Courier New, Menlo, monospace" />
-      <Setter Property="FontSize" Value="12" />
-  <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
-  <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
-      <Setter Property="IsReadOnly" Value="True" />
-      <Setter Property="AcceptsReturn" Value="True" />
-      <Setter Property="AcceptsTab" Value="True" />
-      <Setter Property="SelectionBrush" Value="{DynamicResource ThemeAccentBrush}" />
-      <Setter Property="SelectionForegroundBrush" Value="{DynamicResource ThemeForegroundBrush}" />
-    </Style>
-  </Window.Styles>
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Enter" Command="{Binding OpenSourceCommand}" />
+    <KeyBinding Gesture="F12" Command="{Binding OpenSourceCommand}" />
+    <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenSourceCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding RevealInTreeCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Up" Command="{Binding FlipSplitOrientationCommand}" />
+  </Window.KeyBindings>
   <DockPanel Margin="12" LastChildFill="True">
     <StackPanel DockPanel.Dock="Top" Spacing="4">
       <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="16" />
@@ -42,23 +35,48 @@
 
     <Border BorderBrush="{DynamicResource ThemeBorderMidBrush}" BorderThickness="1" Margin="0 8">
       <Grid RowDefinitions="*,Auto">
-        <avaloniaedit:TextEditor x:Name="SnippetTextEditor"
-                                 IsReadOnly="True"
-                                 ShowLineNumbers="True"
-                                 WordWrap="False"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 VerticalScrollBarVisibility="Auto"
-                                 FontFamily="Consolas, Courier New, Menlo, monospace"
-                                 FontSize="12"
-                                 IsVisible="{Binding HasSnippet}" />
+        <Grid x:Name="ComparisonGrid">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <controls:SourcePreviewEditor x:Name="PrimaryEditor"
+                                        Grid.Column="0"
+                                        Grid.Row="0" />
+          <GridSplitter x:Name="ComparisonSplitter"
+                        Grid.Column="1"
+                        Grid.Row="0"
+                        Background="{DynamicResource ThemeBorderMidBrush}"
+                        IsVisible="{Binding IsSplitViewEnabled}" />
+          <controls:SourcePreviewEditor x:Name="RuntimeEditor"
+                                        Grid.Column="2"
+                                        Grid.Row="0"
+                                        DataContext="{Binding RuntimeComparison}"
+                                        IsVisible="{Binding IsSplitViewEnabled}" />
+        </Grid>
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="8">
+          <ToggleButton Content="Split view"
+                        IsChecked="{Binding IsSplitViewEnabled}" />
+          <Button Content="Swap orientation"
+                  Command="{Binding FlipSplitOrientationCommand}" />
           <Button Content="Open"
-                  Click="OpenClick" />
+                  Command="{Binding OpenSourceCommand}" />
           <Button Content="Copy snippet"
                   Click="CopySnippetClick"
                   IsEnabled="{Binding HasSnippet}" />
           <Button Content="Copy path"
                   Click="CopyPathClick" />
+          <Button Content="Reveal in tree"
+                  IsVisible="{Binding CanNavigateToAst}"
+                  IsEnabled="{Binding CanNavigateToAst}"
+                  Command="{Binding RevealInTreeCommand}" />
           <Button Content="Close"
                   Click="CloseClick" />
         </StackPanel>

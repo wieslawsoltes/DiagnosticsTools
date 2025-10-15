@@ -378,7 +378,7 @@
     </Grid>
 
     <Border Grid.Row="3" Padding="18" Background="{DynamicResource ThemeLayerMidBrush}" CornerRadius="12">
-      <Grid RowDefinitions="Auto,*" RowSpacing="12">
+      <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
           <TextBlock Text="Activity Timeline" FontWeight="SemiBold" FontSize="15" />
           <TextBlock Foreground="{DynamicResource ThemeForegroundLowBrush}" Text="{Binding Timeline.Groups.Count, StringFormat={}{0} groups}" />
@@ -419,6 +419,10 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
         </ScrollViewer>
+        <ctrl:SourcePreviewEditor Grid.Row="2"
+                                  Margin="0,8,0,0"
+                                  DataContext="{Binding TimelinePreview}"
+                                  IsVisible="{Binding ., Converter={x:Static ObjectConverters.IsNotNull}}" />
       </Grid>
     </Border>
   </Grid>

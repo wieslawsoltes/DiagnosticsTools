@@ -2,44 +2,89 @@ using System;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
+using Avalonia.Controls.Primitives;
+using Avalonia.Diagnostics.Controls;
 using Avalonia.Diagnostics.ViewModels;
-using Avalonia.Media;
+using Avalonia.Interactivity;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
-using AvaloniaEdit;
-using AvaloniaEdit.Document;
-using AvaloniaEdit.Rendering;
 
 namespace Avalonia.Diagnostics.Views
 {
     public partial class SourcePreviewWindow : Window
     {
         private SourcePreviewViewModel? _viewModel;
-        private TextEditor? _snippetTextEditor;
-        private HighlightedLineColorizer? _highlightColorizer;
-        private string? _currentSnippet;
-        private IBrush? _highlightBrush;
+        private Grid? _comparisonGrid;
+        private SourcePreviewEditor? _primaryEditor;
+        private SourcePreviewEditor? _runtimeEditor;
+        private GridSplitter? _splitter;
+        private ColumnDefinition? _primaryColumn;
+        private ColumnDefinition? _splitterColumn;
+        private ColumnDefinition? _secondaryColumn;
+        private RowDefinition? _primaryRow;
+        private RowDefinition? _splitterRow;
+        private RowDefinition? _secondaryRow;
+        private SourcePreviewScrollCoordinator? _scrollCoordinator;
+        private IDisposable? _primarySync;
+        private IDisposable? _runtimeSync;
+        private bool _isApplyingSplitMetrics;
 
         public SourcePreviewWindow()
         {
             InitializeComponent();
             Opened += OnOpened;
+            Closed += OnClosed;
         }
 
         private void InitializeComponent()
         {
             AvaloniaXamlLoader.Load(this);
-            _snippetTextEditor = this.FindControl<TextEditor>("SnippetTextEditor");
 
-            if (_snippetTextEditor is not null)
+            _comparisonGrid = this.FindControl<Grid>("ComparisonGrid");
+            _primaryEditor = this.FindControl<SourcePreviewEditor>("PrimaryEditor");
+            _runtimeEditor = this.FindControl<SourcePreviewEditor>("RuntimeEditor");
+            _splitter = this.FindControl<GridSplitter>("ComparisonSplitter");
+
+            if (_comparisonGrid is not null)
             {
-                _highlightBrush = CreateHighlightBrush();
-                _highlightColorizer = new HighlightedLineColorizer
+                if (_comparisonGrid.ColumnDefinitions.Count >= 3)
                 {
-                    HighlightBrush = _highlightBrush
-                };
-                _snippetTextEditor.TextArea.TextView.LineTransformers.Add(_highlightColorizer);
+                    _primaryColumn = _comparisonGrid.ColumnDefinitions[0];
+                    _splitterColumn = _comparisonGrid.ColumnDefinitions[1];
+                    _secondaryColumn = _comparisonGrid.ColumnDefinitions[2];
+                }
+
+                if (_comparisonGrid.RowDefinitions.Count >= 3)
+                {
+                    _primaryRow = _comparisonGrid.RowDefinitions[0];
+                    _splitterRow = _comparisonGrid.RowDefinitions[1];
+                    _secondaryRow = _comparisonGrid.RowDefinitions[2];
+                }
+
+                _comparisonGrid.LayoutUpdated += OnComparisonGridLayoutUpdated;
+            }
+
+            EnsureScrollSynchronization();
+        }
+
+        protected override void OnDataContextChanged(EventArgs e)
+        {
+            base.OnDataContextChanged(e);
+
+            if (_viewModel is not null)
+            {
+                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+                _viewModel.DetachFromMutationOwner();
+            }
+
+            _viewModel = DataContext as SourcePreviewViewModel;
+
+            if (_viewModel is not null)
+            {
+                _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+                RefreshSplitLayout();
             }
         }
 
@@ -81,21 +126,241 @@ namespace Avalonia.Diagnostics.Views
             window.Activate();
         }
 
+        private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not SourcePreviewViewModel vm)
+            {
+                return;
+            }
+
+            switch (e.PropertyName)
+            {
+                case nameof(SourcePreviewViewModel.IsSplitViewEnabled):
+                case nameof(SourcePreviewViewModel.SplitRatio):
+                case nameof(SourcePreviewViewModel.SplitOrientation):
+                case nameof(SourcePreviewViewModel.RuntimeComparison):
+                    RefreshSplitLayout();
+                    break;
+            }
+        }
+        
+        private void RefreshSplitLayout()
+        {
+            if (_viewModel is null)
+            {
+                return;
+            }
+
+            ApplySplitLayout(_viewModel);
+
+            if (_viewModel.IsSplitViewEnabled && _viewModel.RuntimeComparison is not null)
+            {
+                EnsureScrollSynchronization();
+
+                if (_primaryEditor is not null)
+                {
+                    _scrollCoordinator?.RequestSynchronize(_primaryEditor);
+                }
+            }
+        }
+
+        private void ApplySplitLayout(SourcePreviewViewModel vm)
+        {
+            if (_primaryColumn is null || _splitterColumn is null || _secondaryColumn is null ||
+                _primaryRow is null || _splitterRow is null || _secondaryRow is null ||
+                _primaryEditor is null || _runtimeEditor is null || _splitter is null)
+            {
+                return;
+            }
+
+            var isEnabled = vm.IsSplitViewEnabled && vm.RuntimeComparison is not null;
+            var ratio = vm.SplitRatio;
+            var complementary = Math.Max(0.05, 1.0 - ratio);
+
+            _isApplyingSplitMetrics = true;
+            try
+            {
+                if (vm.SplitOrientation == SourcePreviewSplitOrientation.Horizontal)
+                {
+                    _primaryRow.Height = new GridLength(1, GridUnitType.Star);
+                    _splitterRow.Height = new GridLength(0);
+                    _secondaryRow.Height = new GridLength(0);
+
+                    if (isEnabled)
+                    {
+                        _primaryColumn.Width = new GridLength(ratio, GridUnitType.Star);
+                        _splitterColumn.Width = GridLength.Auto;
+                        _secondaryColumn.Width = new GridLength(complementary, GridUnitType.Star);
+                    }
+                    else
+                    {
+                        _primaryColumn.Width = new GridLength(1, GridUnitType.Star);
+                        _splitterColumn.Width = new GridLength(0);
+                        _secondaryColumn.Width = new GridLength(0);
+                    }
+
+                    Grid.SetRow(_primaryEditor, 0);
+                    Grid.SetRowSpan(_primaryEditor, 3);
+                    Grid.SetColumn(_primaryEditor, 0);
+                    Grid.SetColumnSpan(_primaryEditor, 1);
+
+                    Grid.SetRow(_runtimeEditor, 0);
+                    Grid.SetRowSpan(_runtimeEditor, 3);
+                    Grid.SetColumn(_runtimeEditor, 2);
+                    Grid.SetColumnSpan(_runtimeEditor, 1);
+
+                    Grid.SetRow(_splitter, 0);
+                    Grid.SetRowSpan(_splitter, 3);
+                    Grid.SetColumn(_splitter, 1);
+                    Grid.SetColumnSpan(_splitter, 1);
+
+                    _splitter.ResizeDirection = GridResizeDirection.Columns;
+                    _splitter.HorizontalAlignment = HorizontalAlignment.Center;
+                    _splitter.VerticalAlignment = VerticalAlignment.Stretch;
+                    _splitter.Width = 4;
+                    _splitter.Height = double.NaN;
+                }
+                else
+                {
+                    _primaryColumn.Width = new GridLength(1, GridUnitType.Star);
+                    _splitterColumn.Width = new GridLength(0);
+                    _secondaryColumn.Width = new GridLength(0);
+
+                    if (isEnabled)
+                    {
+                        _primaryRow.Height = new GridLength(ratio, GridUnitType.Star);
+                        _splitterRow.Height = GridLength.Auto;
+                        _secondaryRow.Height = new GridLength(complementary, GridUnitType.Star);
+                    }
+                    else
+                    {
+                        _primaryRow.Height = new GridLength(1, GridUnitType.Star);
+                        _splitterRow.Height = new GridLength(0);
+                        _secondaryRow.Height = new GridLength(0);
+                    }
+
+                    Grid.SetColumn(_primaryEditor, 0);
+                    Grid.SetColumnSpan(_primaryEditor, 3);
+                    Grid.SetRow(_primaryEditor, 0);
+                    Grid.SetRowSpan(_primaryEditor, 1);
+
+                    Grid.SetColumn(_runtimeEditor, 0);
+                    Grid.SetColumnSpan(_runtimeEditor, 3);
+                    Grid.SetRow(_runtimeEditor, 2);
+                    Grid.SetRowSpan(_runtimeEditor, 1);
+
+                    Grid.SetColumn(_splitter, 0);
+                    Grid.SetColumnSpan(_splitter, 3);
+                    Grid.SetRow(_splitter, 1);
+                    Grid.SetRowSpan(_splitter, 1);
+
+                    _splitter.ResizeDirection = GridResizeDirection.Rows;
+                    _splitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    _splitter.VerticalAlignment = VerticalAlignment.Center;
+                    _splitter.Width = double.NaN;
+                    _splitter.Height = 4;
+                }
+            }
+            finally
+            {
+                _isApplyingSplitMetrics = false;
+            }
+        }
+
+        private void OnComparisonGridLayoutUpdated(object? sender, EventArgs e)
+        {
+            if (_isApplyingSplitMetrics)
+            {
+                return;
+            }
+
+            if (_viewModel is not { IsSplitViewEnabled: true, RuntimeComparison: not null })
+            {
+                return;
+            }
+
+            if (_primaryEditor is null || _runtimeEditor is null)
+            {
+                return;
+            }
+
+            double ratio;
+
+            if (_viewModel.SplitOrientation == SourcePreviewSplitOrientation.Horizontal)
+            {
+                var primaryWidth = _primaryEditor.Bounds.Width;
+                var runtimeWidth = _runtimeEditor.Bounds.Width;
+                var totalWidth = primaryWidth + runtimeWidth;
+
+                if (totalWidth <= 0.1)
+                {
+                    return;
+                }
+
+                ratio = primaryWidth / totalWidth;
+            }
+            else
+            {
+                var primaryHeight = _primaryEditor.Bounds.Height;
+                var runtimeHeight = _runtimeEditor.Bounds.Height;
+                var totalHeight = primaryHeight + runtimeHeight;
+
+                if (totalHeight <= 0.1)
+                {
+                    return;
+                }
+
+                ratio = primaryHeight / totalHeight;
+            }
+
+            ratio = Math.Max(0.05, Math.Min(0.95, ratio));
+
+            if (Math.Abs(ratio - _viewModel.SplitRatio) > 0.005)
+            {
+                _viewModel.SplitRatio = ratio;
+            }
+        }
+
+        private void EnsureScrollSynchronization()
+        {
+            if (_primaryEditor is null || _runtimeEditor is null)
+            {
+                return;
+            }
+
+            _scrollCoordinator ??= new SourcePreviewScrollCoordinator();
+
+            _primarySync ??= _scrollCoordinator.Attach(_primaryEditor);
+            _runtimeSync ??= _scrollCoordinator.Attach(_runtimeEditor);
+        }
+
         private async void OnOpened(object? sender, EventArgs e)
         {
             if (DataContext is SourcePreviewViewModel vm)
             {
                 await vm.LoadAsync().ConfigureAwait(true);
-                TryUpdateHighlight(vm);
             }
         }
 
-        private async void OpenClick(object? sender, RoutedEventArgs e)
+        private void OnClosed(object? sender, EventArgs e)
         {
-            if (DataContext is SourcePreviewViewModel vm)
+            if (_viewModel is not null)
             {
-                await vm.OpenSourceAsync().ConfigureAwait(true);
+                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+                _viewModel.DetachFromMutationOwner();
+                _viewModel = null;
             }
+
+            if (_comparisonGrid is not null)
+            {
+                _comparisonGrid.LayoutUpdated -= OnComparisonGridLayoutUpdated;
+            }
+
+            _primarySync?.Dispose();
+            _runtimeSync?.Dispose();
+            _primarySync = null;
+            _runtimeSync = null;
+            _scrollCoordinator = null;
         }
 
         private async void CopySnippetClick(object? sender, RoutedEventArgs e)
@@ -125,195 +390,6 @@ namespace Avalonia.Diagnostics.Views
         private void CloseClick(object? sender, RoutedEventArgs e)
         {
             Close();
-        }
-
-        protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
-        {
-            base.OnPropertyChanged(change);
-
-            if (change.Property == DataContextProperty)
-            {
-                if (_viewModel is not null)
-                {
-                    _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
-                }
-
-                var newValue = change.GetNewValue<object?>();
-                _viewModel = newValue as SourcePreviewViewModel;
-
-                if (_viewModel is not null)
-                {
-                    _viewModel.PropertyChanged += OnViewModelPropertyChanged;
-                    TryUpdateHighlight(_viewModel);
-                }
-            }
-        }
-
-        protected override void OnClosed(EventArgs e)
-        {
-            base.OnClosed(e);
-
-            if (_viewModel is not null)
-            {
-                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            }
-        }
-
-        private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
-        {
-            if (sender is SourcePreviewViewModel vm)
-            {
-                if (e.PropertyName is nameof(SourcePreviewViewModel.Snippet)
-                    or nameof(SourcePreviewViewModel.HighlightedLine)
-                    or nameof(SourcePreviewViewModel.SnippetStartLine))
-                {
-                    TryUpdateHighlight(vm);
-                }
-            }
-        }
-
-        private void TryUpdateHighlight(SourcePreviewViewModel vm)
-        {
-            if (_snippetTextEditor is null)
-            {
-                return;
-            }
-
-            var snippet = vm.Snippet;
-            var highlightedLine = vm.HighlightedLine;
-            var snippetStart = vm.SnippetStartLine;
-
-            if (snippet is null)
-            {
-                Dispatcher.UIThread.Post(ClearPreview, DispatcherPriority.Background);
-                return;
-            }
-
-            Dispatcher.UIThread.Post(() => ApplySnippetAndHighlight(vm, snippet, highlightedLine, snippetStart), DispatcherPriority.Background);
-        }
-
-        private void ApplySnippetAndHighlight(SourcePreviewViewModel vm, string snippet, int? highlightedLine, int snippetStartLine)
-        {
-            if (_snippetTextEditor is null || _viewModel != vm)
-            {
-                return;
-            }
-
-            var document = _snippetTextEditor.Document;
-            var snippetChanged = !string.Equals(_currentSnippet, snippet, StringComparison.Ordinal);
-            if (document is null)
-            {
-                _snippetTextEditor.Document = new TextDocument(snippet);
-                _currentSnippet = snippet;
-            }
-            else if (snippetChanged)
-            {
-                document.Text = snippet;
-                _currentSnippet = snippet;
-            }
-
-            UpdateHighlight(highlightedLine, snippetStartLine);
-        }
-
-        private void ClearPreview()
-        {
-            if (_snippetTextEditor is null)
-            {
-                return;
-            }
-
-            _currentSnippet = null;
-
-            if (_snippetTextEditor.Document is { } document)
-            {
-                document.Text = string.Empty;
-            }
-            else
-            {
-                _snippetTextEditor.Document = new TextDocument();
-            }
-
-            if (_highlightColorizer is not null)
-            {
-                _highlightColorizer.LineNumber = null;
-                _snippetTextEditor.TextArea.TextView.InvalidateVisual();
-            }
-        }
-
-        private void UpdateHighlight(int? highlightedLine, int snippetStartLine)
-        {
-            if (_snippetTextEditor is null || _highlightColorizer is null)
-            {
-                return;
-            }
-
-            var document = _snippetTextEditor.Document;
-            if (highlightedLine is null || document is null || document.LineCount == 0)
-            {
-                if (_highlightColorizer.LineNumber is not null)
-                {
-                    _highlightColorizer.LineNumber = null;
-                    _snippetTextEditor.TextArea.TextView.InvalidateVisual();
-                }
-                return;
-            }
-
-            var targetLine = highlightedLine.Value - snippetStartLine + 1;
-            if (targetLine < 1 || targetLine > document.LineCount)
-            {
-                if (_highlightColorizer.LineNumber is not null)
-                {
-                    _highlightColorizer.LineNumber = null;
-                    _snippetTextEditor.TextArea.TextView.InvalidateVisual();
-                }
-                return;
-            }
-
-            if (_highlightColorizer.LineNumber != targetLine)
-            {
-                _highlightColorizer.LineNumber = targetLine;
-            }
-
-            _snippetTextEditor.ScrollTo(targetLine, 0);
-            _snippetTextEditor.TextArea.Caret.Position = new TextViewPosition(targetLine, 0);
-            _snippetTextEditor.TextArea.TextView.InvalidateVisual();
-        }
-
-        private IBrush CreateHighlightBrush()
-        {
-            if (Application.Current?.TryFindResource("ThemeAccentBrush", out var resource) == true &&
-                resource is ISolidColorBrush accent)
-            {
-                var accentColor = accent.Color;
-                var highlightColor = Color.FromArgb(0x60, accentColor.R, accentColor.G, accentColor.B);
-                return new SolidColorBrush(highlightColor);
-            }
-
-            return new SolidColorBrush(Color.FromArgb(0x60, 0x56, 0x9C, 0xD6));
-        }
-
-        private sealed class HighlightedLineColorizer : DocumentColorizingTransformer
-        {
-            public int? LineNumber { get; set; }
-            public IBrush? HighlightBrush { get; init; }
-
-            protected override void ColorizeLine(DocumentLine line)
-            {
-                if (HighlightBrush is null || LineNumber is null)
-                {
-                    return;
-                }
-
-                if (line.LineNumber != LineNumber.Value)
-                {
-                    return;
-                }
-
-                ChangeLinePart(line.Offset, line.EndOffset, element =>
-                {
-                    element.TextRunProperties.SetBackgroundBrush(HighlightBrush);
-                });
-            }
         }
     }
 }

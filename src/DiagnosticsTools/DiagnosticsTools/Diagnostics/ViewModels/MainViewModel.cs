@@ -8,10 +8,15 @@ using Avalonia.Threading;
 using Avalonia.Reactive;
 using Avalonia.Rendering;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Windows.Input;
 using Avalonia.Media;
 using Avalonia.Diagnostics.Metrics;
+using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels.Metrics;
+using Avalonia.Diagnostics.Xaml;
+using Microsoft.CodeAnalysis;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -26,6 +31,11 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly MetricsListenerService _metricsListener;
         private readonly MetricsPageViewModel _metrics;
         private readonly IDisposable _pointerOverSubscription;
+        private readonly XamlMutationDispatcher _mutationDispatcher;
+        private readonly DelegateCommand _undoMutationCommand;
+        private readonly DelegateCommand _redoMutationCommand;
+        private readonly List<WeakReference<SourcePreviewViewModel>> _sourcePreviewObservers = new();
+        private readonly object _sourcePreviewGate = new();
         private ViewModelBase? _content;
         private int _selectedTab;
         private string? _focusedControl;
@@ -48,15 +58,38 @@ namespace Avalonia.Diagnostics.ViewModels
         private PropertyChangedEventHandler? _visualTreeScopeHandler;
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
+        private readonly XamlAstWorkspace _xamlAstWorkspace;
+        private readonly PropertyInspectorChangeEmitter _propertyChangeEmitter;
+        private readonly Workspace? _roslynWorkspace;
+        private readonly EventHandler<WorkspaceChangeEventArgs>? _workspaceChangedHandler;
 
-        public MainViewModel(AvaloniaObject root, ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
+        public MainViewModel(AvaloniaObject root, ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator, Workspace? roslynWorkspace = null)
         {
             _root = root;
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
-            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator);
-            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator);
-            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator);
+            _roslynWorkspace = roslynWorkspace;
+            _xamlAstWorkspace = new XamlAstWorkspace();
+            _mutationDispatcher = new XamlMutationDispatcher(_xamlAstWorkspace, _roslynWorkspace);
+            _propertyChangeEmitter = new PropertyInspectorChangeEmitter(_mutationDispatcher);
+            _propertyChangeEmitter.ChangeCompleted += OnMutationCompleted;
+            _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
+            _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
+            if (_roslynWorkspace is not null)
+            {
+                _workspaceChangedHandler = OnRoslynWorkspaceChanged;
+                _roslynWorkspace.WorkspaceChanged += _workspaceChangedHandler;
+            }
+            else
+            {
+                _workspaceChangedHandler = null;
+            }
+            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _logicalTree.AttachChangeEmitter(_propertyChangeEmitter);
+            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _visualTree.AttachChangeEmitter(_propertyChangeEmitter);
+            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _combinedTree.AttachChangeEmitter(_propertyChangeEmitter);
             AttachScopePersistence(
                 _combinedTree,
                 () => _combinedTreeScopeKey,
@@ -101,7 +134,17 @@ namespace Avalonia.Diagnostics.ViewModels
                             }
                         });
             }
+
+            UpdateMutationCommandStates();
         }
+
+        public ICommand UndoMutationCommand => _undoMutationCommand;
+
+        public ICommand RedoMutationCommand => _redoMutationCommand;
+
+        public bool CanUndoMutation => _mutationDispatcher.CanUndo;
+
+        public bool CanRedoMutation => _mutationDispatcher.CanRedo;
 
         public bool FreezePopups
         {
@@ -301,6 +344,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void Dispose()
         {
+            _propertyChangeEmitter.ChangeCompleted -= OnMutationCompleted;
+            if (_roslynWorkspace is not null && _workspaceChangedHandler is not null)
+            {
+                _roslynWorkspace.WorkspaceChanged -= _workspaceChangedHandler;
+            }
             if (KeyboardDevice.Instance is not null)
                 KeyboardDevice.Instance.PropertyChanged -= KeyboardPropertyChanged;
             _pointerOverSubscription.Dispose();
@@ -310,9 +358,14 @@ namespace Avalonia.Diagnostics.ViewModels
             _logicalTree.Dispose();
             _visualTree.Dispose();
             _combinedTree.Dispose();
+            _xamlAstWorkspace.Dispose();
             _metrics.Dispose();
             _metricsListener.Dispose();
             _currentFocusHighlightAdorner?.Dispose();
+            lock (_sourcePreviewGate)
+            {
+                _sourcePreviewObservers.Clear();
+            }
             if (TryGetRenderer() is { } renderer)
             {
                 renderer.Diagnostics.DebugOverlays = RendererDebugOverlays.None;
@@ -425,6 +478,230 @@ namespace Avalonia.Diagnostics.ViewModels
                     //TODO: Notify error
                 }
             }
+        }
+
+        private void OnMutationCompleted(object? sender, MutationCompletedEventArgs e)
+        {
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => ProcessMutationCompletion(e), DispatcherPriority.Background);
+            }
+            else
+            {
+                ProcessMutationCompletion(e);
+            }
+        }
+
+        private async Task UndoMutationAsync()
+        {
+            if (!_mutationDispatcher.CanUndo)
+            {
+                return;
+            }
+
+            await _mutationDispatcher.UndoAsync().ConfigureAwait(false);
+        }
+
+        private async Task RedoMutationAsync()
+        {
+            if (!_mutationDispatcher.CanRedo)
+            {
+                return;
+            }
+
+            await _mutationDispatcher.RedoAsync().ConfigureAwait(false);
+        }
+
+        private void UpdateMutationCommandStates()
+        {
+            _undoMutationCommand.RaiseCanExecuteChanged();
+            _redoMutationCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(CanUndoMutation));
+            RaisePropertyChanged(nameof(CanRedoMutation));
+        }
+
+        internal void RegisterSourcePreview(SourcePreviewViewModel preview)
+        {
+            if (preview is null)
+            {
+                return;
+            }
+
+            lock (_sourcePreviewGate)
+            {
+                CleanupSourcePreviewObservers_NoLock();
+                _sourcePreviewObservers.Add(new WeakReference<SourcePreviewViewModel>(preview));
+            }
+        }
+
+        internal void UnregisterSourcePreview(SourcePreviewViewModel preview)
+        {
+            if (preview is null)
+            {
+                return;
+            }
+
+            lock (_sourcePreviewGate)
+            {
+                CleanupSourcePreviewObservers_NoLock(preview);
+            }
+        }
+
+        private void ProcessMutationCompletion(MutationCompletedEventArgs args)
+        {
+            UpdateMutationCommandStates();
+
+            switch (args.Result.Status)
+            {
+                case ChangeDispatchStatus.Success:
+                    NotifyMutationSuccess(args);
+                    break;
+                case ChangeDispatchStatus.GuardFailure:
+                case ChangeDispatchStatus.MutationFailure:
+                    NotifyMutationFailure(args);
+                    break;
+            }
+        }
+
+        private void NotifyMutationSuccess(MutationCompletedEventArgs args)
+        {
+            _logicalTree.NotifyMutationCompleted(args);
+            _visualTree.NotifyMutationCompleted(args);
+            _combinedTree.NotifyMutationCompleted(args);
+
+            if (Content is TreePageViewModel activeTree &&
+                activeTree != _logicalTree &&
+                activeTree != _visualTree &&
+                activeTree != _combinedTree)
+            {
+                activeTree.NotifyMutationCompleted(args);
+            }
+
+            RefreshSourcePreviews(args);
+        }
+
+        private void NotifyMutationFailure(MutationCompletedEventArgs args)
+        {
+            _logicalTree.NotifyMutationCompleted(args);
+            _visualTree.NotifyMutationCompleted(args);
+            _combinedTree.NotifyMutationCompleted(args);
+
+            if (Content is TreePageViewModel activeTree &&
+                activeTree != _logicalTree &&
+                activeTree != _visualTree &&
+                activeTree != _combinedTree)
+            {
+                activeTree.NotifyMutationCompleted(args);
+            }
+
+            RefreshSourcePreviews(args);
+        }
+
+        private void RefreshSourcePreviews(MutationCompletedEventArgs args)
+        {
+            SourcePreviewViewModel?[] snapshot;
+
+            lock (_sourcePreviewGate)
+            {
+                CleanupSourcePreviewObservers_NoLock();
+                if (_sourcePreviewObservers.Count == 0)
+                {
+                    return;
+                }
+
+                snapshot = new SourcePreviewViewModel?[_sourcePreviewObservers.Count];
+
+                var index = 0;
+                foreach (var reference in _sourcePreviewObservers)
+                {
+                    if (reference.TryGetTarget(out var target) && target is not null)
+                    {
+                        snapshot[index++] = target;
+                    }
+                }
+
+                if (index != snapshot.Length)
+                {
+                    Array.Resize(ref snapshot, index);
+                }
+            }
+
+            foreach (var preview in snapshot)
+            {
+                preview?.HandleMutationCompleted(args);
+            }
+        }
+
+        private void CleanupSourcePreviewObservers_NoLock(SourcePreviewViewModel? instance = null)
+        {
+            for (var i = _sourcePreviewObservers.Count - 1; i >= 0; i--)
+            {
+                if (!_sourcePreviewObservers[i].TryGetTarget(out var target) ||
+                    (instance is not null && ReferenceEquals(target, instance)))
+                {
+                    _sourcePreviewObservers.RemoveAt(i);
+                }
+            }
+        }
+
+        private void OnRoslynWorkspaceChanged(object? sender, WorkspaceChangeEventArgs e)
+        {
+            string? path = null;
+
+            try
+            {
+                if (e.Kind == WorkspaceChangeKind.SolutionCleared || e.Kind == WorkspaceChangeKind.SolutionRemoved)
+                {
+                    _xamlAstWorkspace.InvalidateAll();
+                    return;
+                }
+
+                path = ResolveWorkspaceDocumentPath(e);
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return;
+                }
+
+                _xamlAstWorkspace.Invalidate(path!);
+            }
+            catch
+            {
+                // Workspace notifications should not break diagnostics tooling.
+            }
+        }
+
+        private static string? ResolveWorkspaceDocumentPath(WorkspaceChangeEventArgs e)
+        {
+            if (e.DocumentId is not DocumentId documentId)
+            {
+                return null;
+            }
+
+            return e.Kind switch
+            {
+                WorkspaceChangeKind.DocumentAdded or
+                WorkspaceChangeKind.DocumentChanged or
+                WorkspaceChangeKind.DocumentRemoved or
+                WorkspaceChangeKind.DocumentReloaded =>
+                    e.NewSolution.GetDocument(documentId)?.FilePath ??
+                    e.OldSolution.GetDocument(documentId)?.FilePath,
+
+                WorkspaceChangeKind.AdditionalDocumentAdded or
+                WorkspaceChangeKind.AdditionalDocumentChanged or
+                WorkspaceChangeKind.AdditionalDocumentRemoved or
+                WorkspaceChangeKind.AdditionalDocumentReloaded =>
+                    e.NewSolution.GetAdditionalDocument(documentId)?.FilePath ??
+                    e.OldSolution.GetAdditionalDocument(documentId)?.FilePath,
+
+                WorkspaceChangeKind.AnalyzerConfigDocumentAdded or
+                WorkspaceChangeKind.AnalyzerConfigDocumentChanged or
+                WorkspaceChangeKind.AnalyzerConfigDocumentRemoved or
+                WorkspaceChangeKind.AnalyzerConfigDocumentReloaded =>
+                    e.NewSolution.GetAnalyzerConfigDocument(documentId)?.FilePath ??
+                    e.OldSolution.GetAnalyzerConfigDocument(documentId)?.FilePath,
+
+                _ => null
+            };
         }
 
         public void SetOptions(DevToolsOptions options)

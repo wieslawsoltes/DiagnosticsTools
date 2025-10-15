@@ -1,9 +1,15 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Diagnostics.Xaml;
+using Avalonia.Threading;
+using System.Windows.Input;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -12,28 +18,87 @@ namespace Avalonia.Diagnostics.ViewModels
         private static readonly HttpClient SharedHttpClient = new HttpClient();
         private readonly ISourceNavigator _sourceNavigator;
         private readonly HttpClient _httpClient;
-    private string? _snippet;
+        private string? _snippet;
         private bool _isLoading = true;
         private string? _errorMessage;
         private int _snippetStartLine;
-        private int? _highlightedLine;
+        private int? _highlightedStartLine;
+        private int? _highlightedEndLine;
+        private int? _highlightSpanStart;
+        private int? _highlightSpanLength;
+        private readonly Action<XamlAstNodeDescriptor?>? _navigateToAst;
+        private readonly DelegateCommand _openSourceCommand;
+        private readonly DelegateCommand _revealInTreeCommand;
+        private readonly SourcePreviewNavigationTarget _revealNavigationTarget;
+        private readonly ObservableCollection<SourcePreviewNavigationTarget> _navigationTargets = new();
+        private readonly DelegateCommand _flipSplitOrientationCommand;
+        private SourcePreviewViewModel? _runtimeComparison;
+        private bool _isSplitViewEnabled;
+        private double _splitRatio;
+        private SourcePreviewSplitOrientation _splitOrientation;
+        private bool _hasManualSnippet;
+        private bool _suppressSplitEnabledPersistence;
+        private bool _suppressSplitRatioPersistence;
+        private static bool s_lastSplitEnabled;
+        private static double s_lastHorizontalRatio = 0.5;
+        private static double s_lastVerticalRatio = 0.5;
+        private static SourcePreviewSplitOrientation s_lastOrientation = SourcePreviewSplitOrientation.Horizontal;
+        private MainViewModel? _mutationOwner;
 
-        public SourcePreviewViewModel(SourceInfo sourceInfo, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, string? initialErrorMessage = null)
+        public SourcePreviewViewModel(
+            SourceInfo sourceInfo,
+            ISourceNavigator sourceNavigator,
+            XamlAstSelection? astSelection = null,
+            Action<XamlAstNodeDescriptor?>? navigateToAst = null,
+            HttpClient? httpClient = null,
+            string? initialErrorMessage = null,
+            MainViewModel? mutationOwner = null)
         {
             SourceInfo = sourceInfo ?? throw new ArgumentNullException(nameof(sourceInfo));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _httpClient = httpClient ?? SharedHttpClient;
+            AstSelection = astSelection;
+            _navigateToAst = navigateToAst;
+            if (mutationOwner is not null)
+            {
+                AttachToMutationOwner(mutationOwner);
+            }
             Title = string.IsNullOrWhiteSpace(SourceInfo.DisplayPath)
                 ? "Source Preview"
                 : SourceInfo.DisplayPath;
+            _splitOrientation = s_lastOrientation;
+            _splitRatio = NormalizeRatio(_splitOrientation == SourcePreviewSplitOrientation.Horizontal
+                ? s_lastHorizontalRatio
+                : s_lastVerticalRatio);
+            _isSplitViewEnabled = s_lastSplitEnabled;
+            _flipSplitOrientationCommand = new DelegateCommand(() =>
+            {
+                SplitOrientation = SplitOrientation == SourcePreviewSplitOrientation.Horizontal
+                    ? SourcePreviewSplitOrientation.Vertical
+                    : SourcePreviewSplitOrientation.Horizontal;
+            });
             if (!string.IsNullOrEmpty(initialErrorMessage))
             {
                 ErrorMessage = initialErrorMessage;
                 IsLoading = false;
             }
+
+            RaisePropertyChanged(nameof(CanNavigateToAst));
+            _openSourceCommand = new DelegateCommand(OpenSourceAsync, () => SourceInfo.HasLocation);
+            _revealInTreeCommand = new DelegateCommand(
+                () =>
+                {
+                    NavigateToAst();
+                    return Task.CompletedTask;
+                },
+                () => CanNavigateToAst);
+            _revealNavigationTarget = new SourcePreviewNavigationTarget("Reveal in Tree", _revealInTreeCommand);
+            UpdateCommandStates();
         }
 
         public SourceInfo SourceInfo { get; }
+
+        public XamlAstSelection? AstSelection { get; private set; }
 
         public string Title { get; }
 
@@ -67,15 +132,122 @@ namespace Avalonia.Diagnostics.ViewModels
             private set => RaiseAndSetIfChanged(ref _snippetStartLine, value);
         }
 
-        public int? HighlightedLine
+        public int? HighlightedStartLine
         {
-            get => _highlightedLine;
-            private set => RaiseAndSetIfChanged(ref _highlightedLine, value);
+            get => _highlightedStartLine;
+            private set => RaiseAndSetIfChanged(ref _highlightedStartLine, value);
+        }
+
+        public int? HighlightedEndLine
+        {
+            get => _highlightedEndLine;
+            private set => RaiseAndSetIfChanged(ref _highlightedEndLine, value);
+        }
+
+        public int? HighlightSpanStart
+        {
+            get => _highlightSpanStart;
+            private set => RaiseAndSetIfChanged(ref _highlightSpanStart, value);
+        }
+
+        public int? HighlightSpanLength
+        {
+            get => _highlightSpanLength;
+            private set => RaiseAndSetIfChanged(ref _highlightSpanLength, value);
         }
 
         public bool HasSnippet => !string.IsNullOrEmpty(Snippet);
 
         public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+
+        public bool CanNavigateToAst => _navigateToAst is not null && AstSelection?.Node is not null;
+
+        public ICommand OpenSourceCommand => _openSourceCommand;
+
+        public ICommand RevealInTreeCommand => _revealInTreeCommand;
+
+        public ICommand FlipSplitOrientationCommand => _flipSplitOrientationCommand;
+
+        public SourcePreviewViewModel? RuntimeComparison
+        {
+            get => _runtimeComparison;
+            set
+            {
+                if (RaiseAndSetIfChanged(ref _runtimeComparison, value))
+                {
+                    if (value is null)
+                    {
+                        SetSplitViewEnabled(false, persist: false);
+                    }
+                    else if (!IsSplitViewEnabled && s_lastSplitEnabled)
+                    {
+                        SetSplitViewEnabled(true, persist: false);
+                    }
+                }
+            }
+        }
+
+        public bool IsSplitViewEnabled
+        {
+            get => _isSplitViewEnabled;
+            set
+            {
+                if (!SetSplitViewEnabledCore(value))
+                {
+                    return;
+                }
+
+                if (!_suppressSplitEnabledPersistence)
+                {
+                    s_lastSplitEnabled = value;
+                }
+            }
+        }
+
+        public double SplitRatio
+        {
+            get => _splitRatio;
+            set
+            {
+                var normalized = NormalizeRatio(value);
+                if (!SetSplitRatioCore(normalized))
+                {
+                    return;
+                }
+
+                if (!_suppressSplitRatioPersistence)
+                {
+                    if (_splitOrientation == SourcePreviewSplitOrientation.Horizontal)
+                    {
+                        s_lastHorizontalRatio = normalized;
+                    }
+                    else
+                    {
+                        s_lastVerticalRatio = normalized;
+                    }
+                }
+            }
+        }
+
+        public SourcePreviewSplitOrientation SplitOrientation
+        {
+            get => _splitOrientation;
+            set
+            {
+                if (!SetSplitOrientationCore(value))
+                {
+                    return;
+                }
+
+                s_lastOrientation = value;
+                var storedRatio = value == SourcePreviewSplitOrientation.Horizontal
+                    ? s_lastHorizontalRatio
+                    : s_lastVerticalRatio;
+                SetSplitRatio(storedRatio, persist: false);
+            }
+        }
+
+        public IList<SourcePreviewNavigationTarget> NavigationTargets => _navigationTargets;
 
         public string LocationSummary
         {
@@ -112,6 +284,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public async Task LoadAsync()
         {
+            if (_hasManualSnippet)
+            {
+                return;
+            }
+
             if (!IsLoading && (Snippet is not null || ErrorMessage is not null))
             {
                 return;
@@ -122,7 +299,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             try
             {
-                var content = await FetchContentAsync().ConfigureAwait(false);
+                var content = AstSelection?.Document?.Text ?? await FetchContentAsync().ConfigureAwait(false);
                 if (content is null)
                 {
                     ErrorMessage = "Source content is unavailable." +
@@ -147,12 +324,96 @@ namespace Avalonia.Diagnostics.ViewModels
             await _sourceNavigator.NavigateAsync(SourceInfo).ConfigureAwait(false);
         }
 
-        public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null)
+        public void NavigateToAst()
+        {
+            if (!CanNavigateToAst)
+            {
+                return;
+            }
+
+            _navigateToAst?.Invoke(AstSelection?.Node);
+        }
+
+        public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, MainViewModel? mutationOwner = null)
         {
             var messageContext = string.IsNullOrWhiteSpace(context) ? "the requested item" : context;
             var message = $"Source information for {messageContext} is unavailable.";
             var placeholderInfo = new SourceInfo(null, null, null, null, null, null, SourceOrigin.Unknown);
-            return new SourcePreviewViewModel(placeholderInfo, sourceNavigator, httpClient, message);
+            return new SourcePreviewViewModel(placeholderInfo, sourceNavigator, astSelection: null, navigateToAst: null, httpClient: httpClient, initialErrorMessage: message, mutationOwner: mutationOwner);
+        }
+
+        internal void HandleMutationCompleted(MutationCompletedEventArgs args)
+        {
+            if (args.Result.Status != ChangeDispatchStatus.Success)
+            {
+                var message = !string.IsNullOrWhiteSpace(args.Result.Message)
+                    ? args.Result.Message
+                    : args.Result.Status == ChangeDispatchStatus.GuardFailure
+                        ? "The XAML document was modified outside DevTools. Refresh the inspector and retry."
+                        : "The XAML update failed. Check the diagnostics output for details.";
+                SetErrorMessage(message);
+                return;
+            }
+
+            void Reload() => _ = ReloadAfterMutationAsync();
+
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(Reload, DispatcherPriority.Background);
+            }
+            else
+            {
+                Reload();
+            }
+        }
+
+        internal void AttachToMutationOwner(MainViewModel owner)
+        {
+            if (owner is null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(_mutationOwner, owner))
+            {
+                return;
+            }
+
+            _mutationOwner?.UnregisterSourcePreview(this);
+            _mutationOwner = owner;
+            _mutationOwner.RegisterSourcePreview(this);
+        }
+
+        internal void DetachFromMutationOwner()
+        {
+            if (_mutationOwner is null)
+            {
+                return;
+            }
+
+            _mutationOwner.UnregisterSourcePreview(this);
+            _mutationOwner = null;
+        }
+
+        private async Task ReloadAfterMutationAsync()
+        {
+            _hasManualSnippet = false;
+            AstSelection = null;
+            Snippet = null;
+            ErrorMessage = null;
+            await LoadAsync().ConfigureAwait(false);
+        }
+
+        private void SetErrorMessage(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            ErrorMessage = message;
+            Snippet = null;
+            IsLoading = false;
         }
 
         private async Task<string?> FetchContentAsync()
@@ -183,22 +444,198 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private void PopulateSnippet(string content)
         {
-            var normalized = content.Replace("\r\n", "\n");
-            var lines = normalized.Split('\n');
-            var requestedLine = SourceInfo.StartLine ?? 1;
-            var hasLocation = SourceInfo.HasLocation;
+            SnippetStartLine = 1;
+            Snippet = content;
 
-            var builder = new StringBuilder(normalized.Length + (lines.Length * 8));
-            for (var index = 0; index < lines.Length; index++)
+            if (AstSelection?.Node is { } descriptor)
             {
-                var lineNumber = index + 1;
-                var text = lines[index];
-                builder.AppendFormat("{0,5}: {1}\n", lineNumber, text);
+                var span = descriptor.Span;
+                if (span.Length > 0)
+                {
+                    HighlightSpanStart = span.Start;
+                    HighlightSpanLength = span.Length;
+                }
+                else
+                {
+                    HighlightSpanStart = null;
+                    HighlightSpanLength = null;
+                }
+
+                var startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+                var endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+                HighlightedStartLine = startLine;
+                HighlightedEndLine = endLine;
+            }
+            else if (SourceInfo.HasLocation && SourceInfo.StartLine is int start)
+            {
+                var end = SourceInfo.EndLine ?? start;
+                start = Math.Max(start, 1);
+                end = Math.Max(end, start);
+                HighlightedStartLine = start;
+                HighlightedEndLine = end;
+                HighlightSpanStart = null;
+                HighlightSpanLength = null;
+            }
+            else
+            {
+                HighlightedStartLine = null;
+                HighlightedEndLine = null;
+                HighlightSpanStart = null;
+                HighlightSpanLength = null;
             }
 
-            SnippetStartLine = 1;
-            HighlightedLine = hasLocation ? requestedLine : null;
-            Snippet = builder.ToString();
+            RaisePropertyChanged(nameof(CanNavigateToAst));
+            UpdateNavigationTargets();
+            UpdateCommandStates();
         }
+
+        public void SetManualSnippet(string snippet, int snippetStartLine = 1)
+        {
+            _hasManualSnippet = true;
+            ErrorMessage = null;
+            SnippetStartLine = snippetStartLine;
+            Snippet = snippet;
+            HighlightedStartLine = null;
+            HighlightedEndLine = null;
+            HighlightSpanStart = null;
+            HighlightSpanLength = null;
+            IsLoading = false;
+            UpdateNavigationTargets();
+            UpdateCommandStates();
+        }
+
+        public void AddNavigationTarget(SourcePreviewNavigationTarget target)
+        {
+            if (target is null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            _navigationTargets.Add(target);
+        }
+
+        public bool RemoveNavigationTarget(SourcePreviewNavigationTarget target)
+        {
+            if (target is null)
+            {
+                return false;
+            }
+
+            return _navigationTargets.Remove(target);
+        }
+
+        private void UpdateCommandStates()
+        {
+            _openSourceCommand.RaiseCanExecuteChanged();
+            _revealInTreeCommand.RaiseCanExecuteChanged();
+        }
+
+        private void UpdateNavigationTargets()
+        {
+            if (CanNavigateToAst)
+            {
+                if (!_navigationTargets.Contains(_revealNavigationTarget))
+                {
+                    _navigationTargets.Add(_revealNavigationTarget);
+                }
+            }
+            else
+            {
+                _navigationTargets.Remove(_revealNavigationTarget);
+            }
+        }
+
+        private void SetSplitViewEnabled(bool value, bool persist)
+        {
+            var original = _suppressSplitEnabledPersistence;
+            _suppressSplitEnabledPersistence = !persist;
+            try
+            {
+                IsSplitViewEnabled = value;
+            }
+            finally
+            {
+                _suppressSplitEnabledPersistence = original;
+            }
+        }
+
+        private bool SetSplitViewEnabledCore(bool value)
+        {
+            if (_isSplitViewEnabled == value)
+            {
+                return false;
+            }
+
+            RaiseAndSetIfChanged(ref _isSplitViewEnabled, value);
+            return true;
+        }
+
+        private void SetSplitRatio(double ratio, bool persist)
+        {
+            var original = _suppressSplitRatioPersistence;
+            _suppressSplitRatioPersistence = !persist;
+            try
+            {
+                SplitRatio = ratio;
+            }
+            finally
+            {
+                _suppressSplitRatioPersistence = original;
+            }
+        }
+
+        private bool SetSplitRatioCore(double value)
+        {
+            if (AreClose(_splitRatio, value))
+            {
+                return false;
+            }
+
+            RaiseAndSetIfChanged(ref _splitRatio, value);
+            return true;
+        }
+
+        private bool SetSplitOrientationCore(SourcePreviewSplitOrientation value)
+        {
+            if (_splitOrientation == value)
+            {
+                return false;
+            }
+
+            RaiseAndSetIfChanged(ref _splitOrientation, value);
+            return true;
+        }
+
+        private static double NormalizeRatio(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                return 0.5;
+            }
+
+            const double minimum = 0.05;
+            const double maximum = 0.95;
+
+            if (value < minimum)
+            {
+                return minimum;
+            }
+
+            if (value > maximum)
+            {
+                return maximum;
+            }
+
+            return value;
+        }
+
+        private static bool AreClose(double left, double right) =>
+            Math.Abs(left - right) < 0.0001;
+    }
+
+    public enum SourcePreviewSplitOrientation
+    {
+        Horizontal,
+        Vertical
     }
 }

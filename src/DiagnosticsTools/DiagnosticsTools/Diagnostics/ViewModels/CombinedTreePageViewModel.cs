@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Diagnostics.Xaml;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -12,8 +13,9 @@ namespace Avalonia.Diagnostics.ViewModels
             TreeNode[] nodes,
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
-            ISourceNavigator sourceNavigator)
-            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator)
+            ISourceNavigator sourceNavigator,
+            XamlAstWorkspace xamlAstWorkspace)
+            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace)
         {
         }
 
@@ -36,15 +38,16 @@ namespace Avalonia.Diagnostics.ViewModels
             AvaloniaObject root,
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
-            ISourceNavigator sourceNavigator)
+            ISourceNavigator sourceNavigator,
+            XamlAstWorkspace xamlAstWorkspace)
         {
             var nodes = CombinedTreeNode.Create(root);
             if (nodes.Length == 0)
             {
-                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator);
+                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace);
             }
 
-            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator);
+            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace);
         }
 
         protected override bool CanNodeMatch(TreeNode node)

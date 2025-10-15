@@ -25,18 +25,22 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _sourceInfoLoadAttempted;
         private readonly DelegateCommand _previewSourceCommand;
         private readonly DelegateCommand _navigateToSourceCommand;
+        private SourcePreviewViewModel? _inlinePreview;
+        private readonly MainViewModel? _mainViewModel;
 
         public ValueFrameViewModel(
             StyledElement styledElement,
             IValueFrameDiagnostic valueFrame,
             IClipboard? clipboard,
             ISourceInfoService sourceInfoService,
-            ISourceNavigator sourceNavigator)
+            ISourceNavigator sourceNavigator,
+            MainViewModel? mainViewModel = null)
         {
             _valueFrame = valueFrame;
             IsVisible = true;
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
+            _mainViewModel = mainViewModel;
 
             var source = SourceToString(_valueFrame.Source);
             Description = (_valueFrame.Type, source) switch
@@ -118,6 +122,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 _sourceInfo = value;
+                UpdateInlinePreview(value);
                 RaisePropertyChanged(nameof(SourceInfo));
                 RaisePropertyChanged(nameof(SourceSummary));
                 RaisePropertyChanged(nameof(HasSource));
@@ -143,6 +148,21 @@ namespace Avalonia.Diagnostics.ViewModels
         public ICommand NavigateToSourceCommand => _navigateToSourceCommand;
 
         internal event EventHandler<SourcePreviewViewModel>? SourcePreviewRequested;
+
+        public SourcePreviewViewModel? InlinePreview
+        {
+            get => _inlinePreview;
+            private set
+            {
+                if (ReferenceEquals(_inlinePreview, value))
+                {
+                    return;
+                }
+
+                _inlinePreview?.DetachFromMutationOwner();
+                RaiseAndSetIfChanged(ref _inlinePreview, value);
+            }
+        }
 
         public async void NavigateToSource()
         {
@@ -181,8 +201,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator)
-                        : SourcePreviewViewModel.CreateUnavailable(Description, _sourceNavigator);
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel)
+                        : SourcePreviewViewModel.CreateUnavailable(Description, _sourceNavigator, mutationOwner: _mainViewModel);
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
             }
@@ -190,6 +210,29 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 // Preview failures are non-fatal.
             }
+        }
+
+        private void UpdateInlinePreview(SourceInfo? info)
+        {
+            if (info is null)
+            {
+                InlinePreview = null;
+                return;
+            }
+
+            if (InlinePreview is { } existing && Equals(existing.SourceInfo, info))
+            {
+                return;
+            }
+
+            var preview = new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel);
+            InlinePreview = preview;
+            _ = preview.LoadAsync();
+        }
+
+        internal void DetachMutationObserver()
+        {
+            _inlinePreview?.DetachFromMutationOwner();
         }
 
         internal void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)

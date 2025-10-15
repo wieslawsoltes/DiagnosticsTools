@@ -29,6 +29,7 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
         private readonly TimeSpan _throttleInterval;
         private bool _isCapturePaused;
         private DispatcherTimer? _updateTimer;
+        private SourcePreviewViewModel? _timelinePreview;
 
         public MetricsPageViewModel(MetricsListenerService listener, TimeSpan? throttleInterval = null)
         {
@@ -60,6 +61,12 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
 
         public ActivityTimelineViewModel Timeline { get; }
 
+        public SourcePreviewViewModel? TimelinePreview
+        {
+            get => _timelinePreview;
+            private set => RaiseAndSetIfChanged(ref _timelinePreview, value);
+        }
+
         public ICommand PauseCommand { get; }
 
         public ICommand ResumeCommand { get; }
@@ -82,6 +89,11 @@ namespace Avalonia.Diagnostics.ViewModels.Metrics
 
                 ApplyCaptureState();
             }
+        }
+
+        public void SetTimelinePreview(SourcePreviewViewModel? preview)
+        {
+            TimelinePreview = preview;
         }
 
         public void Dispose()

@@ -118,12 +118,12 @@ namespace Avalonia.Diagnostics
 
             var window = new MainWindow
             {
-                Root = root,
                 Width = options.Size.Width,
                 Height = options.Size.Height,
                 Tag = topLevelGroup
             };
             window.SetOptions(options);
+            window.Root = root;
             window.SelectedControl(focusedControl);
             window.Closed += DevToolsClosed;
             s_open.Add(topLevelGroup, window);

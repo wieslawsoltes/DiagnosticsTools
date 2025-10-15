@@ -21,8 +21,14 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
 
 #if DEBUG
-        // Attach DevTools to open with F12 key
-        this.AttachDevTools();
+        // Attach DevTools to open with F12 key and wire Roslyn workspace for persistence tests.
+        var workspace = DiagnosticsWorkspaceProvider.TryCreateWorkspace();
+        var options = new Avalonia.Diagnostics.DevToolsOptions
+        {
+            RoslynWorkspace = workspace
+        };
+
+        this.AttachDevTools(options);
 #endif
     }
 }

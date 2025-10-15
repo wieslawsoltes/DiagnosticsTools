@@ -90,7 +90,9 @@ namespace Avalonia.Diagnostics.Views
                     {
                         newClosable.Closed += RootClosed;
                         var services = EnsureSourceNavigationServices();
-                        DataContext = new MainViewModel(_root, services.Service, services.Navigator);
+                        var viewModel = new MainViewModel(_root, services.Service, services.Navigator, _options.RoslynWorkspace);
+                        DataContext = viewModel;
+                        viewModel.SetOptions(_options);
                     }
                     else
                     {
@@ -211,6 +213,20 @@ namespace Avalonia.Diagnostics.Views
             else if (IsMatched(_hotKeys.InspectHoveredControl, e.Key, modifiers))
             {
                 InspectHoveredControl(root, vm);
+            }
+            else if (IsMatched(_hotKeys.UndoMutation, e.Key, modifiers))
+            {
+                if (vm.UndoMutationCommand.CanExecute(null))
+                {
+                    vm.UndoMutationCommand.Execute(null);
+                }
+            }
+            else if (IsMatched(_hotKeys.RedoMutation, e.Key, modifiers))
+            {
+                if (vm.RedoMutationCommand.CanExecute(null))
+                {
+                    vm.RedoMutationCommand.Execute(null);
+                }
             }
 
             static bool IsMatched(KeyGesture gesture, Key key, KeyModifiers modifiers)

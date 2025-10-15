@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Avalonia.Data;
 
 namespace Avalonia.Diagnostics.ViewModels
@@ -7,6 +8,8 @@ namespace Avalonia.Diagnostics.ViewModels
     public class AvaloniaPropertyViewModel : PropertyViewModel
     {
         private readonly AvaloniaObject _target;
+        private readonly Func<AvaloniaPropertyViewModel, object, ValueTask> _changeCallback;
+        private readonly bool _hasChangeCallback;
         private Type _assignedType;
         private object? _value;
         private string _priority;
@@ -15,11 +18,24 @@ namespace Avalonia.Diagnostics.ViewModels
 
 #nullable disable
         // Remove "nullable disable" after MemberNotNull will work on our CI.
-        public AvaloniaPropertyViewModel(AvaloniaObject o, AvaloniaProperty property)
+        public AvaloniaPropertyViewModel(
+            AvaloniaObject o,
+            AvaloniaProperty property,
+            Func<AvaloniaPropertyViewModel, object, ValueTask>? changeCallback = null)
 #nullable restore
         {
             _target = o;
             Property = property;
+            if (changeCallback is not null)
+            {
+                _changeCallback = changeCallback;
+                _hasChangeCallback = true;
+            }
+            else
+            {
+                _changeCallback = static (_, __) => new ValueTask();
+                _hasChangeCallback = false;
+            }
 
             Name = property.IsAttached ?
                 $"[{property.OwnerType.Name}.{property.Name}]" :
@@ -45,6 +61,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     _target.SetValue(Property, value);
                     Update();
+                    NotifyChange();
                 }
                 catch { }
             }
@@ -114,6 +131,23 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
             }
             RaisePropertyChanged(nameof(Type));
+        }
+
+        private void NotifyChange()
+        {
+            if (!_hasChangeCallback)
+            {
+                return;
+            }
+
+            try
+            {
+                var _ = _changeCallback(this, _value!);
+            }
+            catch
+            {
+                // Swallow notification failures; change emission must not break inspector editing.
+            }
         }
 
         protected override void OnPropertyChanged(PropertyChangedEventArgs e)

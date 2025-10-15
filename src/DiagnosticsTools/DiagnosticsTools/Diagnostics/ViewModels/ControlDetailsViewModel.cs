@@ -5,10 +5,13 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
+using System.Windows.Input;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Metadata;
 using Avalonia.Data;
+using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
@@ -43,6 +46,11 @@ namespace Avalonia.Diagnostics.ViewModels
         };
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
+        private PropertyInspectorChangeEmitter? _changeEmitter;
+        private XamlMutationDispatcher? _mutationDispatcher;
+        private readonly DelegateCommand _undoMutationCommand;
+        private readonly DelegateCommand _redoMutationCommand;
+        private string? _mutationStatusMessage;
 
         public ControlDetailsViewModel(
             TreePageViewModel treePage,
@@ -59,6 +67,10 @@ namespace Avalonia.Diagnostics.ViewModels
                 : default;
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
+            _changeEmitter = null;
+            _mutationDispatcher = null;
+            _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
+            _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
 
             NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
 
@@ -85,7 +97,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 foreach (var appliedStyle in styleDiagnostics.AppliedFrames.OrderBy(s => s.Priority))
                 {
-                    var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator);
+                    var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView);
                     frame.SourcePreviewRequested += OnValueFramePreviewRequested;
                     AppliedFrames.Add(frame);
                 }
@@ -152,18 +164,40 @@ namespace Avalonia.Diagnostics.ViewModels
             set => RaiseAndSetIfChanged(ref _framesStatus, value);
         }
 
+        public ICommand UndoMutationCommand => _undoMutationCommand;
+
+        public ICommand RedoMutationCommand => _redoMutationCommand;
+
+        public bool CanUndoMutation => _mutationDispatcher?.CanUndo ?? false;
+
+        public bool CanRedoMutation => _mutationDispatcher?.CanRedo ?? false;
+
+        public bool ShowMutationCommands => _mutationDispatcher is not null;
+
+        public string? MutationStatusMessage
+        {
+            get => _mutationStatusMessage;
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _mutationStatusMessage, value))
+                {
+                    RaisePropertyChanged(nameof(HasMutationStatusMessage));
+                }
+            }
+        }
+
+        public bool HasMutationStatusMessage => !string.IsNullOrWhiteSpace(MutationStatusMessage);
+
         public ControlLayoutViewModel? Layout { get; }
 
         protected override void OnPropertyChanged(PropertyChangedEventArgs e)
         {
             base.OnPropertyChanged(e);
 
-            if (e.PropertyName == nameof(SnapshotFrames))
+            if (string.Equals(e.PropertyName, nameof(SnapshotFrames), StringComparison.Ordinal) &&
+                !SnapshotFrames)
             {
-                if (!SnapshotFrames)
-                {
-                    UpdateStyles();
-                }
+                UpdateStyles();
             }
         }
 
@@ -182,6 +216,34 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 style.IsVisible = hasVisibleSetter;
             }
+        }
+
+        internal void AttachChangeEmitter(PropertyInspectorChangeEmitter? changeEmitter)
+        {
+            if (ReferenceEquals(_changeEmitter, changeEmitter))
+            {
+                return;
+            }
+
+            if (_changeEmitter is not null)
+            {
+                _changeEmitter.ChangeCompleted -= OnChangeEmitterCompleted;
+            }
+
+            _changeEmitter = changeEmitter;
+            _mutationDispatcher = _changeEmitter?.MutationDispatcher;
+
+            if (_changeEmitter is not null)
+            {
+                _changeEmitter.ChangeCompleted += OnChangeEmitterCompleted;
+            }
+            else
+            {
+                MutationStatusMessage = null;
+            }
+
+            UpdateMutationCommandStates();
+            RaisePropertyChanged(nameof(ShowMutationCommands));
         }
 
         public void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
@@ -207,6 +269,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void Dispose()
         {
+            if (_changeEmitter is not null)
+            {
+                _changeEmitter.ChangeCompleted -= OnChangeEmitterCompleted;
+            }
+
             if (_avaloniaObject is INotifyPropertyChanged inpc)
             {
                 inpc.PropertyChanged -= ControlPropertyChanged;
@@ -225,21 +292,144 @@ namespace Avalonia.Diagnostics.ViewModels
             foreach (var frame in AppliedFrames)
             {
                 frame.SourcePreviewRequested -= OnValueFramePreviewRequested;
+                frame.DetachMutationObserver();
             }
         }
 
-        private static IEnumerable<PropertyViewModel> GetAvaloniaProperties(object o)
+        private void OnChangeEmitterCompleted(object? sender, MutationCompletedEventArgs e)
         {
-            if (o is AvaloniaObject ao)
+            if (!Dispatcher.UIThread.CheckAccess())
             {
-                return AvaloniaPropertyRegistry.Instance.GetRegistered(ao)
-                    .Union(AvaloniaPropertyRegistry.Instance.GetRegisteredAttached(ao.GetType()))
-                    .Select(x => new AvaloniaPropertyViewModel(ao, x));
+                Dispatcher.UIThread.Post(() => ApplyMutationCompletion(e), DispatcherPriority.Background);
             }
             else
             {
-                return Enumerable.Empty<AvaloniaPropertyViewModel>();
+                ApplyMutationCompletion(e);
             }
+        }
+
+        private void ApplyMutationCompletion(MutationCompletedEventArgs args)
+        {
+            if (args.Result.Status == ChangeDispatchStatus.Success)
+            {
+                MutationStatusMessage = null;
+            }
+            else
+            {
+                HandleMutationFailure(args);
+            }
+
+            UpdateMutationCommandStates();
+        }
+
+        internal void HandleMutationSuccess(MutationCompletedEventArgs args)
+        {
+            MutationStatusMessage = null;
+
+            var selectedProperty = SelectedProperty is AvaloniaPropertyViewModel propertyVm ? propertyVm.Property : null;
+
+            NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
+
+            if (selectedProperty is not null)
+            {
+                SelectProperty(selectedProperty);
+            }
+
+            RefreshValueFrames();
+            UpdateStyleFilters();
+        }
+
+        internal void HandleMutationFailure(MutationCompletedEventArgs args)
+        {
+            MutationStatusMessage = BuildMutationFailureMessage(args);
+        }
+
+        private static string BuildMutationFailureMessage(MutationCompletedEventArgs args)
+        {
+            var baseMessage = string.IsNullOrWhiteSpace(args.Result.Message)
+                ? args.Result.Status switch
+                {
+                    ChangeDispatchStatus.GuardFailure => "The underlying XAML changed. Refresh the inspector to pick up the latest document and retry.",
+                    ChangeDispatchStatus.MutationFailure => "Failed to persist the XAML change. See output for more details.",
+                    _ => "XAML mutation failed."
+                }
+                : args.Result.Message!;
+
+            if (!string.IsNullOrWhiteSpace(args.Result.OperationId))
+            {
+                baseMessage = $"{baseMessage} (operation {args.Result.OperationId})";
+            }
+
+            return baseMessage;
+        }
+
+        private async Task UndoMutationAsync()
+        {
+            var dispatcher = _mutationDispatcher;
+            if (dispatcher is null || !dispatcher.CanUndo)
+            {
+                return;
+            }
+
+            await dispatcher.UndoAsync().ConfigureAwait(false);
+        }
+
+        private async Task RedoMutationAsync()
+        {
+            var dispatcher = _mutationDispatcher;
+            if (dispatcher is null || !dispatcher.CanRedo)
+            {
+                return;
+            }
+
+            await dispatcher.RedoAsync().ConfigureAwait(false);
+        }
+
+        private void UpdateMutationCommandStates()
+        {
+            _undoMutationCommand.RaiseCanExecuteChanged();
+            _redoMutationCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(CanUndoMutation));
+            RaisePropertyChanged(nameof(CanRedoMutation));
+            RaisePropertyChanged(nameof(ShowMutationCommands));
+        }
+
+        private IEnumerable<PropertyViewModel> GetAvaloniaProperties(object o)
+        {
+            if (o is not AvaloniaObject ao)
+            {
+                return Enumerable.Empty<PropertyViewModel>();
+            }
+
+            var registry = AvaloniaPropertyRegistry.Instance;
+            var seen = new HashSet<AvaloniaProperty>();
+            var list = new List<PropertyViewModel>();
+
+            foreach (var property in registry.GetRegistered(ao))
+            {
+                if (seen.Add(property))
+                {
+                    list.Add(CreateAvaloniaPropertyViewModel(ao, property));
+                }
+            }
+
+            foreach (var attached in registry.GetRegisteredAttached(ao.GetType()))
+            {
+                if (seen.Add(attached))
+                {
+                    list.Add(CreateAvaloniaPropertyViewModel(ao, attached));
+                }
+            }
+
+            return list;
+        }
+
+        private PropertyViewModel CreateAvaloniaPropertyViewModel(AvaloniaObject target, AvaloniaProperty property)
+        {
+            return new AvaloniaPropertyViewModel(
+                target,
+                property,
+                OnAvaloniaPropertyEditedAsync);
         }
 
         private static IEnumerable<PropertyViewModel> GetClrProperties(object o, bool showImplementedInterfaces)
@@ -266,6 +456,52 @@ namespace Avalonia.Diagnostics.ViewModels
             return t.GetProperties()
                 .Where(x => x.GetIndexParameters().Length == 0)
                 .Select(x => new ClrPropertyViewModel(o, x));
+        }
+
+        private ValueTask OnAvaloniaPropertyEditedAsync(AvaloniaPropertyViewModel viewModel, object? newValue)
+        {
+            if (_changeEmitter is null)
+            {
+                return new ValueTask();
+            }
+
+            var context = CreatePropertyChangeContext(viewModel.Property);
+            if (context is null)
+            {
+                return new ValueTask();
+            }
+
+            var gesture = DetermineGesture(viewModel.Property, newValue);
+            return _changeEmitter.EmitLocalValueChangeAsync(context, newValue, gesture);
+        }
+
+        private PropertyChangeContext? CreatePropertyChangeContext(AvaloniaProperty property)
+        {
+            var selection = TreePage.SelectedNodeXaml;
+            if (selection is null || selection.Node is null)
+            {
+                return null;
+            }
+
+            return new PropertyChangeContext(
+                _avaloniaObject,
+                property,
+                selection.Document,
+                selection.Node,
+                frame: "LocalValue",
+                valueSource: "LocalValue");
+        }
+
+        private static string DetermineGesture(AvaloniaProperty property, object? newValue)
+        {
+            if (property.PropertyType == typeof(bool) ||
+                property.PropertyType == typeof(bool?) ||
+                newValue is bool)
+            {
+                return "ToggleCheckBox";
+            }
+
+            return "SetLocalValue";
         }
 
         private void OnValueFramePreviewRequested(object? sender, SourcePreviewViewModel e)
@@ -365,6 +601,34 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             FramesStatus = $"Value Frames ({activeCount}/{AppliedFrames.Count} active)";
+        }
+
+        private void RefreshValueFrames()
+        {
+            if (_avaloniaObject is not StyledElement styledElement)
+            {
+                return;
+            }
+
+            foreach (var frame in AppliedFrames)
+            {
+                frame.SourcePreviewRequested -= OnValueFramePreviewRequested;
+                frame.DetachMutationObserver();
+            }
+
+            AppliedFrames.Clear();
+
+            var clipboard = TopLevel.GetTopLevel(_avaloniaObject as Visual)?.Clipboard;
+            var diagnostics = styledElement.GetValueStoreDiagnostic();
+
+            foreach (var appliedStyle in diagnostics.AppliedFrames.OrderBy(s => s.Priority))
+            {
+                var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView);
+                frame.SourcePreviewRequested += OnValueFramePreviewRequested;
+                AppliedFrames.Add(frame);
+            }
+
+            UpdateStyles();
         }
 
         private bool FilterProperty(object arg)

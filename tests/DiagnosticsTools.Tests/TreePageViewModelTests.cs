@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.ViewModels;
+using Avalonia.Diagnostics.Xaml;
 using Avalonia.Headless.XUnit;
 using Xunit;
 
@@ -17,9 +18,10 @@ public class TreePageViewModelTests
         root.Children.Add(child);
 
         var sourceInfoService = new StubSourceInfoService();
-        var sourceNavigator = new StubSourceNavigator();
-        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
+       var sourceNavigator = new StubSourceNavigator();
+       using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var workspace = new XamlAstWorkspace();
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace);
 
         treeViewModel.TreeFilter.FilterString = "StackPanel";
 
@@ -38,9 +40,10 @@ public class TreePageViewModelTests
         root.Children.Add(child);
 
         var sourceInfoService = new StubSourceInfoService();
-        var sourceNavigator = new StubSourceNavigator();
-        using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
+       var sourceNavigator = new StubSourceNavigator();
+       using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
+        using var workspace = new XamlAstWorkspace();
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace);
 
         treeViewModel.TreeFilter.FilterString = "Button";
 
@@ -60,7 +63,8 @@ public class TreePageViewModelTests
         var sourceInfoService = new StubSourceInfoService();
         var sourceNavigator = new StubSourceNavigator();
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
+        using var workspace = new XamlAstWorkspace();
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace);
 
         var rootNode = Assert.Single(treeViewModel.Nodes);
         var childNode = Assert.Single(rootNode.Children);
@@ -84,7 +88,8 @@ public class TreePageViewModelTests
         var sourceInfoService = new StubSourceInfoService();
         var sourceNavigator = new StubSourceNavigator();
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
+        using var workspace = new XamlAstWorkspace();
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace);
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Name;
         treeViewModel.TreeFilter.FilterString = "PART_Control";
@@ -106,7 +111,8 @@ public class TreePageViewModelTests
         var sourceInfoService = new StubSourceInfoService();
         var sourceNavigator = new StubSourceNavigator();
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator);
+        using var workspace = new XamlAstWorkspace();
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace);
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Classes;
         treeViewModel.TreeFilter.FilterString = ".highlighted";
