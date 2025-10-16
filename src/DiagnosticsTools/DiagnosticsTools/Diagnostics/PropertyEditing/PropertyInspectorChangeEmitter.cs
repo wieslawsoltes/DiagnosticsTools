@@ -128,6 +128,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         internal event EventHandler<MutationCompletedEventArgs>? ChangeCompleted;
 
+        internal event EventHandler<ExternalDocumentChangedEventArgs>? ExternalDocumentChanged;
+
         private void SubscribeToWorkspace(XamlAstWorkspace workspace)
         {
             if (workspace is null)
@@ -151,6 +153,22 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
 
             InvalidateMutationOrigins(e.Path);
+
+            if (MutationDispatcher is { } dispatcher &&
+                (e.Kind == XamlDocumentChangeKind.Invalidated || e.Kind == XamlDocumentChangeKind.Removed))
+            {
+                dispatcher.HandleExternalDocumentChanged(e.Path);
+            }
+
+            if (ExternalDocumentChanged is not null &&
+                (e.Kind == XamlDocumentChangeKind.Invalidated || e.Kind == XamlDocumentChangeKind.Removed))
+            {
+                var args = new ExternalDocumentChangedEventArgs(
+                    e.Path,
+                    e.Kind,
+                    MutationProvenance.ExternalDocument);
+                OnExternalDocumentChanged(args);
+            }
         }
 
         private void InvalidateMutationOrigins(string? path)
@@ -573,12 +591,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         private async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken)
         {
+            var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
+
             try
             {
                 var result = await _dispatcher.DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
                 if (!_dispatcherProvidesNotifications)
                 {
-                    OnChangeCompleted(new MutationCompletedEventArgs(envelope, result));
+                    OnChangeCompleted(new MutationCompletedEventArgs(envelope, result, provenance));
                 }
 
                 return result;
@@ -590,7 +610,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             catch (Exception ex)
             {
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
-                OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure));
+                OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure, provenance));
                 return failure;
             }
         }
@@ -613,6 +633,18 @@ namespace Avalonia.Diagnostics.PropertyEditing
             try
             {
                 ChangeCompleted.Invoke(this, args);
+            }
+            catch
+            {
+                // Diagnostics notifications should not throw.
+            }
+        }
+
+        private void OnExternalDocumentChanged(ExternalDocumentChangedEventArgs args)
+        {
+            try
+            {
+                ExternalDocumentChanged?.Invoke(this, args);
             }
             catch
             {

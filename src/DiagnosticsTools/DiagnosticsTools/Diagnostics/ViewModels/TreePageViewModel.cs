@@ -290,6 +290,30 @@ namespace Avalonia.Diagnostics.ViewModels
             _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
         }
 
+        internal void HandleExternalDocumentChanged(ExternalDocumentChangedEventArgs args)
+        {
+            if (args is null)
+            {
+                return;
+            }
+
+            if (SelectedNode is null)
+            {
+                return;
+            }
+
+            var currentPath = ResolveSelectedDocumentPath();
+            if (!string.IsNullOrWhiteSpace(currentPath) &&
+                args.Path is { } path &&
+                !PathsEqual(currentPath!, path))
+            {
+                return;
+            }
+
+            _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+            Details?.HandleExternalDocumentChanged(args);
+        }
+
         public void Dispose()
         {
             foreach (var node in Nodes)

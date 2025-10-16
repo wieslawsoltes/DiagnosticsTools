@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using System.Runtime.InteropServices;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -45,6 +47,10 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             new DataGridComparerSortDescription(PropertyComparer.Instance!, ListSortDirection.Ascending),
         };
+        private static readonly StringComparer PathComparer =
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
         private ISourceInfoService _sourceInfoService;
         private ISourceNavigator _sourceNavigator;
         private PropertyInspectorChangeEmitter? _changeEmitter;
@@ -52,7 +58,11 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly DelegateCommand _undoMutationCommand;
         private readonly DelegateCommand _redoMutationCommand;
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
+        private readonly DelegateCommand _reloadExternalDocumentCommand;
+        private readonly DelegateCommand _dismissExternalDocumentChangeCommand;
         private string? _mutationStatusMessage;
+        private bool _hasExternalDocumentChanges;
+        private ExternalDocumentChangedEventArgs? _externalDocumentChange;
 
         public ControlDetailsViewModel(
             TreePageViewModel treePage,
@@ -75,6 +85,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
             _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
+            _reloadExternalDocumentCommand = new DelegateCommand(ReloadExternalDocumentAsync, () => HasExternalDocumentChanges);
+            _dismissExternalDocumentChangeCommand = new DelegateCommand(DismissExternalDocumentChange, () => HasExternalDocumentChanges);
 
             NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
 
@@ -192,6 +204,23 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool HasMutationStatusMessage => !string.IsNullOrWhiteSpace(MutationStatusMessage);
 
+        public bool HasExternalDocumentChanges
+        {
+            get => _hasExternalDocumentChanges;
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _hasExternalDocumentChanges, value))
+                {
+                    _reloadExternalDocumentCommand.RaiseCanExecuteChanged();
+                    _dismissExternalDocumentChangeCommand.RaiseCanExecuteChanged();
+                }
+            }
+        }
+
+        public ICommand ReloadExternalDocumentCommand => _reloadExternalDocumentCommand;
+
+        public ICommand DismissExternalDocumentChangeCommand => _dismissExternalDocumentChangeCommand;
+
         public ControlLayoutViewModel? Layout { get; }
 
         protected override void OnPropertyChanged(PropertyChangedEventArgs e)
@@ -232,6 +261,7 @@ namespace Avalonia.Diagnostics.ViewModels
             if (_changeEmitter is not null)
             {
                 _changeEmitter.ChangeCompleted -= OnChangeEmitterCompleted;
+                _changeEmitter.ExternalDocumentChanged -= OnExternalDocumentChanged;
             }
 
             _changeEmitter = changeEmitter;
@@ -240,10 +270,12 @@ namespace Avalonia.Diagnostics.ViewModels
             if (_changeEmitter is not null)
             {
                 _changeEmitter.ChangeCompleted += OnChangeEmitterCompleted;
+                _changeEmitter.ExternalDocumentChanged += OnExternalDocumentChanged;
             }
             else
             {
                 MutationStatusMessage = null;
+                ClearExternalDocumentChange();
             }
 
             UpdateMutationCommandStates();
@@ -276,6 +308,7 @@ namespace Avalonia.Diagnostics.ViewModels
             if (_changeEmitter is not null)
             {
                 _changeEmitter.ChangeCompleted -= OnChangeEmitterCompleted;
+                _changeEmitter.ExternalDocumentChanged -= OnExternalDocumentChanged;
             }
 
             if (_avaloniaObject is INotifyPropertyChanged inpc)
@@ -312,6 +345,18 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
+        private void OnExternalDocumentChanged(object? sender, ExternalDocumentChangedEventArgs e)
+        {
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => HandleExternalDocumentChanged(e), DispatcherPriority.Background);
+            }
+            else
+            {
+                HandleExternalDocumentChanged(e);
+            }
+        }
+
         private void ApplyMutationCompletion(MutationCompletedEventArgs args)
         {
             if (args.Result.Status == ChangeDispatchStatus.Success)
@@ -329,6 +374,7 @@ namespace Avalonia.Diagnostics.ViewModels
         internal void HandleMutationSuccess(MutationCompletedEventArgs args)
         {
             MutationStatusMessage = null;
+            ClearExternalDocumentChange();
 
             var selectedProperty = SelectedProperty is AvaloniaPropertyViewModel propertyVm ? propertyVm.Property : null;
 
@@ -341,11 +387,35 @@ namespace Avalonia.Diagnostics.ViewModels
 
             RefreshValueFrames();
             UpdateStyleFilters();
+
+            if (args.Provenance == MutationProvenance.PropertyInspector)
+            {
+                RefreshInspectorPreviousValues();
+            }
         }
 
         internal void HandleMutationFailure(MutationCompletedEventArgs args)
         {
             MutationStatusMessage = BuildMutationFailureMessage(args);
+        }
+
+        internal void HandleExternalDocumentChanged(ExternalDocumentChangedEventArgs args)
+        {
+            if (args is null)
+            {
+                return;
+            }
+
+            if (!IsMatchingDocument(args.Path))
+            {
+                return;
+            }
+
+            _externalDocumentChange = args;
+            HasExternalDocumentChanges = true;
+            MutationStatusMessage = BuildExternalDocumentChangeMessage(args);
+            RefreshInspectorPreviousValues();
+            UpdateMutationCommandStates();
         }
 
         private static string BuildMutationFailureMessage(MutationCompletedEventArgs args)
@@ -365,6 +435,134 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return baseMessage;
+        }
+
+        private string BuildExternalDocumentChangeMessage(ExternalDocumentChangedEventArgs args)
+        {
+            var baseMessage = "The XAML document changed outside the inspector.";
+
+            if (!string.IsNullOrWhiteSpace(args.Path))
+            {
+                baseMessage = $"{baseMessage} ({Path.GetFileName(args.Path)}).";
+            }
+            else
+            {
+                baseMessage = $"{baseMessage}.";
+            }
+
+            return $"{baseMessage} Reload to sync the inspector or dismiss to continue with existing values.";
+        }
+
+        private Task ReloadExternalDocumentAsync()
+        {
+            if (!HasExternalDocumentChanges)
+            {
+                return Task.CompletedTask;
+            }
+
+            var selectedKey = SelectedProperty?.Key;
+
+            NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
+
+            if (selectedKey is not null &&
+                _propertyIndex is not null &&
+                _propertyIndex.TryGetValue(selectedKey, out var properties) &&
+                properties.Length > 0)
+            {
+                SelectedProperty = properties[0];
+            }
+
+            RefreshValueFrames();
+            UpdateStyleFilters();
+            RefreshInspectorPreviousValues();
+
+            MutationStatusMessage = null;
+            ClearExternalDocumentChange();
+            UpdateMutationCommandStates();
+
+            return Task.CompletedTask;
+        }
+
+        private void DismissExternalDocumentChange()
+        {
+            if (_externalDocumentChange is not null)
+            {
+                MutationStatusMessage = null;
+            }
+
+            ClearExternalDocumentChange();
+            UpdateMutationCommandStates();
+        }
+
+        private void ClearExternalDocumentChange()
+        {
+            _externalDocumentChange = null;
+            HasExternalDocumentChanges = false;
+        }
+
+        private void RefreshInspectorPreviousValues()
+        {
+            if (_propertyIndex is null)
+            {
+                return;
+            }
+
+            foreach (var bucket in _propertyIndex.Values)
+            {
+                foreach (var property in bucket)
+                {
+                    if (property is AvaloniaPropertyViewModel avaloniaProperty)
+                    {
+                        avaloniaProperty.RefreshPreviousValueBaseline();
+                    }
+                }
+            }
+        }
+
+        private bool IsMatchingDocument(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return true;
+            }
+
+            var selectedPath = ResolveSelectedDocumentPath();
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return false;
+            }
+
+            var normalizedSelected = NormalizePath(selectedPath!);
+            var normalizedPath = NormalizePath(path!);
+
+            return PathComparer.Equals(normalizedSelected, normalizedPath);
+        }
+
+        private string? ResolveSelectedDocumentPath()
+        {
+            if (TreePage.SelectedNodeSourceInfo?.LocalPath is { } local && !string.IsNullOrWhiteSpace(local))
+            {
+                return local;
+            }
+
+            return TreePage.SelectedNodeXaml?.Document?.Path;
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch
+            {
+                return path;
+            }
         }
 
         private async Task UndoMutationAsync()

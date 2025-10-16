@@ -366,11 +366,24 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             try
             {
-                MutationCompleted.Invoke(this, new MutationCompletedEventArgs(envelope, result));
+                var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
+                MutationCompleted.Invoke(this, new MutationCompletedEventArgs(envelope, result, provenance));
             }
             catch
             {
                 // Diagnostics notifications should not throw.
+            }
+        }
+
+        internal void HandleExternalDocumentChanged(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                _journal.Clear();
+            }
+            else
+            {
+                _journal.DiscardEntriesForPath(path!);
             }
         }
     }

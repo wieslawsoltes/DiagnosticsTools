@@ -44,6 +44,7 @@ namespace Avalonia.Diagnostics.ViewModels
             DeclaringType = property.OwnerType;
             _propertyType = property.PropertyType;
             Update();
+            RefreshPreviousValueBaseline();
         }
 
         public AvaloniaProperty Property { get; }
@@ -144,6 +145,18 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
             }
             RaisePropertyChanged(nameof(Type));
+        }
+
+        internal void RefreshPreviousValueBaseline()
+        {
+            try
+            {
+                PreviousValue = _target.GetValue(Property);
+            }
+            catch
+            {
+                PreviousValue = null;
+            }
         }
 
         private void NotifyChange()

@@ -80,13 +80,23 @@
                               UseWholeWordFilter="{Binding UseWholeWordFilter}"
                               UseRegexFilter="{Binding UseRegexFilter}"/>
 
-      <TextBlock Grid.Row="2"
-                 Text="{Binding MutationStatusMessage}"
-                 Foreground="OrangeRed"
-                 FontWeight="SemiBold"
-                 TextWrapping="Wrap"
-                 Margin="0 4 0 4"
-                 IsVisible="{Binding HasMutationStatusMessage}"/>
+      <StackPanel Grid.Row="2"
+                  Margin="0 4 0 4"
+                  IsVisible="{Binding HasMutationStatusMessage}">
+        <TextBlock Text="{Binding MutationStatusMessage}"
+                   Foreground="OrangeRed"
+                   FontWeight="SemiBold"
+                   TextWrapping="Wrap"/>
+        <StackPanel Orientation="Horizontal"
+                    Margin="0 4 0 0"
+                    IsVisible="{Binding HasExternalDocumentChanges}">
+          <Button Content="Reload"
+                  Command="{Binding ReloadExternalDocumentCommand}"
+                  Margin="0 0 8 0"/>
+          <Button Content="Dismiss"
+                  Command="{Binding DismissExternalDocumentChangeCommand}"/>
+        </StackPanel>
+      </StackPanel>
       
       <DataGrid 
                 x:Name="DataGrid"

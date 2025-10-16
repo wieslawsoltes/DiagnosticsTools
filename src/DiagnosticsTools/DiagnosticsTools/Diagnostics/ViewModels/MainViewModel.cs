@@ -78,6 +78,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _mutationDispatcher = new XamlMutationDispatcher(_xamlAstWorkspace, _roslynWorkspace);
             _propertyChangeEmitter = new PropertyInspectorChangeEmitter(_mutationDispatcher);
             _propertyChangeEmitter.ChangeCompleted += OnMutationCompleted;
+            _propertyChangeEmitter.ExternalDocumentChanged += OnExternalDocumentChanged;
             _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
             if (_roslynWorkspace is not null)
@@ -350,6 +351,7 @@ namespace Avalonia.Diagnostics.ViewModels
         public void Dispose()
         {
             _propertyChangeEmitter.ChangeCompleted -= OnMutationCompleted;
+            _propertyChangeEmitter.ExternalDocumentChanged -= OnExternalDocumentChanged;
             if (_roslynWorkspace is not null && _workspaceChangedHandler is not null)
             {
                 _roslynWorkspace.WorkspaceChanged -= _workspaceChangedHandler;
@@ -494,6 +496,32 @@ namespace Avalonia.Diagnostics.ViewModels
             else
             {
                 ProcessMutationCompletion(e);
+            }
+        }
+
+        private void OnExternalDocumentChanged(object? sender, ExternalDocumentChangedEventArgs e)
+        {
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(
+                    () => OnExternalDocumentChanged(sender, e),
+                    DispatcherPriority.Background);
+                return;
+            }
+
+            _runtimeCoordinator.Clear();
+            UpdateMutationCommandStates();
+
+            _logicalTree.HandleExternalDocumentChanged(e);
+            _visualTree.HandleExternalDocumentChanged(e);
+            _combinedTree.HandleExternalDocumentChanged(e);
+
+            if (Content is TreePageViewModel activeTree &&
+                activeTree != _logicalTree &&
+                activeTree != _visualTree &&
+                activeTree != _combinedTree)
+            {
+                activeTree.HandleExternalDocumentChanged(e);
             }
         }
 
