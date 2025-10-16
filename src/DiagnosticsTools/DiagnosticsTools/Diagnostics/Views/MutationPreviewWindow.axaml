@@ -1,0 +1,52 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:Avalonia.Diagnostics.Controls"
+        x:Class="Avalonia.Diagnostics.Views.MutationPreviewWindow"
+        Width="900"
+        Height="600"
+        Title="Mutation Preview"
+        CanResize="True">
+  <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12" Margin="12">
+    <StackPanel Spacing="6">
+      <TextBlock Text="{Binding StatusText}" FontWeight="Bold"/>
+      <TextBlock Text="{Binding Message}" TextWrapping="Wrap" IsVisible="{Binding HasMessage}"/>
+    </StackPanel>
+
+    <StackPanel Grid.Row="1" Spacing="12">
+      <StackPanel Spacing="4" IsVisible="{Binding HasChanges}">
+        <TextBlock Text="{Binding ChangesTitle}" FontWeight="Bold"/>
+        <ItemsControl ItemsSource="{Binding Changes}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Margin="0,0,0,8">
+                <TextBlock Text="{Binding Header}" FontWeight="Bold"/>
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasSummary}"/>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+        <StackPanel>
+          <TextBlock Text="Original" FontWeight="Bold" Margin="0,0,0,4"/>
+          <views:MutationPreviewTextView Text="{Binding OriginalText}"
+                                         Highlights="{Binding OriginalHighlights}"
+                                         HighlightBrush="{Binding OriginalHighlightBrush}"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1">
+          <TextBlock Text="Preview" FontWeight="Bold" Margin="0,0,0,4"/>
+          <views:MutationPreviewTextView Text="{Binding PreviewText}"
+                                         Highlights="{Binding PreviewHighlights}"
+                                         HighlightBrush="{Binding PreviewHighlightBrush}"/>
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Edit Raw XAML" Command="{Binding EditRawCommand}" IsVisible="{Binding CanEditRaw}"/>
+      <Button Content="Cancel" Command="{Binding CancelCommand}"/>
+      <Button Content="Apply Changes" Command="{Binding ApplyCommand}" IsEnabled="{Binding CanApply}"/>
+    </StackPanel>
+  </Grid>
+</Window>

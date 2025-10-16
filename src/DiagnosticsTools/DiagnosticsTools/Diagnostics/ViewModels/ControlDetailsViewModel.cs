@@ -15,10 +15,13 @@ using Avalonia.Data;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Diagnostics.Views;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.Controls.ApplicationLifetimes;
 using System.Runtime.InteropServices;
+using Avalonia.Diagnostics.Xaml;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -674,7 +677,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private async ValueTask OnAvaloniaPropertyEditedAsync(AvaloniaPropertyViewModel viewModel, object? newValue)
         {
-            if (_changeEmitter is null)
+            var changeEmitter = _changeEmitter;
+            if (changeEmitter is null)
             {
                 return;
             }
@@ -686,27 +690,51 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             var gesture = DetermineGesture(viewModel.Property, newValue);
+            var command = DetermineEditorCommand(viewModel, newValue);
             var previous = viewModel.PreviousValue;
 
-            var result = await _changeEmitter.EmitLocalValueChangeAsync(context, newValue, previous, gesture).ConfigureAwait(false);
+            MutationStatusMessage = null;
+
+            var preview = await changeEmitter.PreviewLocalValueChangeAsync(context, newValue, previous, gesture, command).ConfigureAwait(false);
+            var decision = await ShowMutationPreviewAsync(context, preview).ConfigureAwait(false);
+            if (decision != MutationPreviewDecision.Apply)
+            {
+                viewModel.ActiveEditorCommand = EditorCommandDescriptor.Default;
+                await RevertPropertyAsync(context, viewModel, previous).ConfigureAwait(false);
+                if (decision == MutationPreviewDecision.EditRaw || preview.Status != ChangeDispatchStatus.Success)
+                {
+                    MutationStatusMessage = preview.Message ?? "Preview unavailable. Use Source Preview to edit the document manually.";
+                }
+
+                return;
+            }
+
+            ChangeDispatchResult result;
+            try
+            {
+                result = await changeEmitter.EmitLocalValueChangeAsync(context, newValue, previous, gesture, command).ConfigureAwait(false);
+            }
+            finally
+            {
+                viewModel.ActiveEditorCommand = EditorCommandDescriptor.Default;
+            }
+
+            var mutationTarget = context.Target;
+            var mutationProperty = context.Property;
 
             if (result.Status == ChangeDispatchStatus.Success)
             {
-                if (_runtimeCoordinator is not null && !Equals(previous, newValue))
+                if (_runtimeCoordinator is not null && mutationTarget is AvaloniaObject target && mutationProperty is AvaloniaProperty property && !Equals(previous, newValue))
                 {
                     await Dispatcher.UIThread.InvokeAsync(() =>
-                        _runtimeCoordinator.RegisterPropertyChange(context.Target, context.Property, previous, newValue),
+                        _runtimeCoordinator.RegisterPropertyChange(target, property, previous, newValue),
                         DispatcherPriority.Background);
                 }
 
                 return;
             }
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                ApplyPropertyValue(context.Target, context.Property, previous);
-                viewModel.Update();
-            }, DispatcherPriority.Background);
+            await RevertPropertyAsync(context, viewModel, previous).ConfigureAwait(false);
         }
 
         private PropertyChangeContext? CreatePropertyChangeContext(AvaloniaProperty property)
@@ -738,6 +766,74 @@ namespace Avalonia.Diagnostics.ViewModels
             return "SetLocalValue";
         }
 
+        private static EditorCommandDescriptor DetermineEditorCommand(PropertyViewModel viewModel, object? newValue)
+        {
+            var command = EditorCommandDescriptor.Normalize(viewModel.ActiveEditorCommand);
+            if (!string.Equals(command.Id, EditorCommandDescriptor.Default.Id, StringComparison.Ordinal))
+            {
+                return command;
+            }
+
+            var propertyType = viewModel.PropertyType;
+            if (propertyType == typeof(bool) || propertyType == typeof(bool?) || newValue is bool)
+            {
+                return EditorCommandDescriptor.Toggle;
+            }
+
+            if (IsNumericType(propertyType))
+            {
+                return EditorCommandDescriptor.Slider;
+            }
+
+            if (propertyType == typeof(Avalonia.Media.Color) || propertyType == typeof(Avalonia.Media.Color?))
+            {
+                return EditorCommandDescriptor.ColorPicker;
+            }
+
+            if (typeof(IBinding).IsAssignableFrom(propertyType))
+            {
+                return EditorCommandDescriptor.BindingEditor;
+            }
+
+            return EditorCommandDescriptor.Default;
+        }
+
+        private static bool IsNumericType(Type type)
+        {
+            if (type is null)
+            {
+                return false;
+            }
+
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>))
+            {
+                type = Nullable.GetUnderlyingType(type)!;
+            }
+
+            if (type.IsEnum)
+            {
+                return false;
+            }
+
+            switch (Type.GetTypeCode(type))
+            {
+                case TypeCode.Byte:
+                case TypeCode.Decimal:
+                case TypeCode.Double:
+                case TypeCode.Int16:
+                case TypeCode.Int32:
+                case TypeCode.Int64:
+                case TypeCode.SByte:
+                case TypeCode.Single:
+                case TypeCode.UInt16:
+                case TypeCode.UInt32:
+                case TypeCode.UInt64:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private static void ApplyPropertyValue(AvaloniaObject target, AvaloniaProperty property, object? value)
         {
             if (ReferenceEquals(value, AvaloniaProperty.UnsetValue))
@@ -748,6 +844,83 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 target.SetValue(property, value);
             }
+        }
+
+        private async Task<MutationPreviewDecision> ShowMutationPreviewAsync(PropertyChangeContext context, MutationPreviewResult preview)
+        {
+            if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime lifetime ||
+                lifetime.MainWindow is not Window owner)
+            {
+                return preview.Status == ChangeDispatchStatus.Success ? MutationPreviewDecision.Apply : MutationPreviewDecision.Cancel;
+            }
+
+            var window = new MutationPreviewWindow();
+
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                var decision = await window.ShowDialogAsync(owner, preview, allowRawEditing: true).ConfigureAwait(false);
+                if (decision == MutationPreviewDecision.EditRaw)
+                {
+                    await OpenSourcePreviewAsync(context).ConfigureAwait(false);
+                }
+
+                return decision;
+            }
+
+            var tcs = new TaskCompletionSource<MutationPreviewDecision>();
+            Dispatcher.UIThread.Post(async () =>
+            {
+                var result = await window.ShowDialogAsync(owner, preview, allowRawEditing: true).ConfigureAwait(false);
+                if (result == MutationPreviewDecision.EditRaw)
+                {
+                    await OpenSourcePreviewAsync(context).ConfigureAwait(false);
+                }
+                tcs.TrySetResult(result);
+            });
+            return await tcs.Task.ConfigureAwait(false);
+        }
+
+        private async Task RevertPropertyAsync(PropertyChangeContext context, AvaloniaPropertyViewModel viewModel, object? previous)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                ApplyPropertyValue(context.Target, context.Property, previous);
+                viewModel.Update();
+            }, DispatcherPriority.Background);
+        }
+
+        private async Task OpenSourcePreviewAsync(PropertyChangeContext context)
+        {
+            var document = context.Document;
+            var descriptor = context.Descriptor;
+
+            if (string.IsNullOrWhiteSpace(document.Path))
+            {
+                return;
+            }
+
+            var sourceInfo = new SourceInfo(
+                document.Path,
+                null,
+                descriptor.LineSpan.Start.Line + 1,
+                descriptor.LineSpan.Start.Column + 1,
+                descriptor.LineSpan.End.Line + 1,
+                descriptor.LineSpan.End.Column + 1,
+                SourceOrigin.Local);
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var selection = new XamlAstSelection(document, descriptor, new[] { descriptor });
+                var preview = new SourcePreviewViewModel(
+                    sourceInfo,
+                    _sourceNavigator,
+                    selection,
+                    mutationOwner: TreePage.MainView,
+                    xamlAstWorkspace: _mutationDispatcher?.Workspace);
+
+                TreePage.RegisterPreview(preview);
+                SourcePreviewRequested?.Invoke(this, preview);
+            }, DispatcherPriority.Background);
         }
 
         private void OnValueFramePreviewRequested(object? sender, SourcePreviewViewModel e)

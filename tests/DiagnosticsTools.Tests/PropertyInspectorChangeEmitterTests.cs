@@ -54,6 +54,8 @@ public class PropertyInspectorChangeEmitterTests
         Assert.Equal(fixedTime, nonNullEnvelope.InitiatedAt);
         Assert.Equal("PropertyEditor", nonNullEnvelope.Source.Inspector);
         Assert.Equal("ToggleCheckBox", nonNullEnvelope.Source.Gesture);
+        Assert.NotNull(nonNullEnvelope.Source.Command);
+        Assert.Equal(EditorCommandDescriptor.Toggle.Id, nonNullEnvelope.Source.Command!.Id);
         Assert.Equal(document.Path, nonNullEnvelope.Document.Path);
         Assert.Equal(version.ToString(), nonNullEnvelope.Document.Version);
         Assert.Equal("LocalValue", nonNullEnvelope.Context.Frame);
@@ -108,7 +110,9 @@ public class PropertyInspectorChangeEmitterTests
 
         var envelope = dispatcher.LastEnvelope;
         Assert.NotNull(envelope);
-        var operation = Assert.Single(envelope!.Changes);
+        Assert.NotNull(envelope!.Source.Command);
+        Assert.Equal(EditorCommandDescriptor.Toggle.Id, envelope.Source.Command!.Id);
+        var operation = Assert.Single(envelope.Changes);
         Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
         Assert.Equal("Unset", operation.Payload.ValueKind);
         Assert.Null(operation.Payload.NewValue);

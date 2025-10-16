@@ -158,6 +158,78 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return result;
         }
 
+        internal async ValueTask<MutationPreviewResult> PreviewAsync(ChangeEnvelope envelope, CancellationToken cancellationToken = default)
+        {
+            if (envelope is null)
+            {
+                throw new ArgumentNullException(nameof(envelope));
+            }
+
+            if (string.IsNullOrWhiteSpace(envelope.Document.Path))
+            {
+                return MutationPreviewResult.Failure(ChangeDispatchStatus.MutationFailure, "Document path is missing.", string.Empty, envelope.Changes);
+            }
+
+            var path = envelope.Document.Path;
+            XamlAstDocument document;
+            IXamlAstIndex index;
+
+            try
+            {
+                document = await _workspace.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+                index = await _workspace.GetIndexAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return MutationPreviewResult.Failure(ChangeDispatchStatus.MutationFailure, $"Failed to load XAML document: {ex.Message}", string.Empty, envelope.Changes);
+            }
+
+            var currentVersion = document.Version.ToString();
+            if (!string.Equals(currentVersion, envelope.Document.Version, StringComparison.Ordinal))
+            {
+                return MutationPreviewResult.Failure(ChangeDispatchStatus.GuardFailure, "Document version mismatch.", document.Text, envelope.Changes);
+            }
+
+            var edits = new List<XamlTextEdit>();
+
+            foreach (var change in envelope.Changes)
+            {
+                if (!XamlMutationEditBuilder.TryBuildEdits(document, index, change, edits, out var failure))
+                {
+                    return MutationPreviewResult.Failure(failure.Status, failure.Message, document.Text, envelope.Changes);
+                }
+            }
+
+            if (edits.Count == 0)
+            {
+                return MutationPreviewResult.Success(
+                    document.Text,
+                    document.Text,
+                    Array.Empty<XamlTextEdit>(),
+                    Array.Empty<MutationPreviewHighlight>(),
+                    Array.Empty<MutationPreviewHighlight>(),
+                    envelope.Changes);
+            }
+
+            try
+            {
+                var originalHighlights = new List<MutationPreviewHighlight>();
+                var previewHighlights = new List<MutationPreviewHighlight>();
+                var previewText = ApplyEdits(document.Text, edits, originalHighlights, previewHighlights);
+                return MutationPreviewResult.Success(
+                    document.Text,
+                    previewText,
+                    edits.ToArray(),
+                    originalHighlights,
+                    previewHighlights,
+                    envelope.Changes);
+            }
+            catch (Exception ex)
+            {
+                return MutationPreviewResult.Failure(ChangeDispatchStatus.MutationFailure, $"Failed to apply XAML edits: {ex.Message}", document.Text, envelope.Changes);
+            }
+        }
+
         private async Task<ChangeDispatchResult> PersistAsync(string path, string content, CancellationToken cancellationToken)
         {
             var (handledByWorkspace, workspaceResult) = await TryPersistWithWorkspaceAsync(path, content, cancellationToken).ConfigureAwait(false);
@@ -316,7 +388,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
-        private static string ApplyEdits(string text, IReadOnlyList<XamlTextEdit> edits)
+        private static string ApplyEdits(string text, IReadOnlyList<XamlTextEdit> edits) =>
+            ApplyEdits(text, edits, null, null);
+
+        private static string ApplyEdits(
+            string text,
+            IReadOnlyList<XamlTextEdit> edits,
+            IList<MutationPreviewHighlight>? originalHighlights,
+            IList<MutationPreviewHighlight>? previewHighlights)
         {
             var sorted = new List<XamlTextEdit>(edits);
             sorted.Sort(static (a, b) => a.Start.CompareTo(b.Start));
@@ -332,6 +411,19 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 }
 
                 builder.Append(text, current, edit.Start - current);
+
+                if (edit.Length > 0)
+                {
+                    originalHighlights?.Add(new MutationPreviewHighlight(edit.Start, edit.Length));
+                }
+
+                var insertionOffset = builder.Length;
+
+                if (!string.IsNullOrEmpty(edit.Replacement))
+                {
+                    previewHighlights?.Add(new MutationPreviewHighlight(insertionOffset, edit.Replacement.Length));
+                }
+
                 builder.Append(edit.Replacement);
                 current = edit.Start + edit.Length;
             }

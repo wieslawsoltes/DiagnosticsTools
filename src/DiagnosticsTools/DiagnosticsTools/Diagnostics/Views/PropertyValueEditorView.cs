@@ -8,6 +8,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Diagnostics.Controls;
+using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -57,8 +58,10 @@ namespace Avalonia.Diagnostics.Views
             if (Property?.PropertyType is not { } propertyType)
                 return null;
 
+            Property.ActiveEditorCommand = EditorCommandDescriptor.Default;
+
             if (propertyType == typeof(bool))
-                return CreateControl<CheckBox>(ToggleButton.IsCheckedProperty);
+                return CreateControl<CheckBox>(ToggleButton.IsCheckedProperty, commandDescriptor: EditorCommandDescriptor.Toggle);
 
             //TODO: Infinity, NaN not working with NumericUpDown
             if (IsValidNumeric(propertyType))
@@ -71,7 +74,8 @@ namespace Avalonia.Diagnostics.Views
                         n.NumberFormat = new NumberFormatInfo { NumberDecimalDigits = 0 };
                         n.ParsingNumberStyle = NumberStyles.Integer;
                     },
-                    readonlyProperty: NumericUpDown.IsReadOnlyProperty);
+                    readonlyProperty: NumericUpDown.IsReadOnlyProperty,
+                    commandDescriptor: EditorCommandDescriptor.Slider);
 
             if (propertyType == typeof(Color))
             {
@@ -98,6 +102,8 @@ namespace Avalonia.Diagnostics.Views
                     Cursor = new Cursor(StandardCursorType.Hand),
                     IsEnabled = !Property.IsReadonly
                 };
+
+                RegisterCommand(sp, EditorCommandDescriptor.ColorPicker);
 
                 var cv = new ColorView
                 {
@@ -198,6 +204,10 @@ namespace Avalonia.Diagnostics.Views
                         c.ItemsSource = Enum.GetValues(propertyType);
                     });
 
+            var textCommand = ImplementsInterface<IBinding>(propertyType)
+                ? EditorCommandDescriptor.BindingEditor
+                : EditorCommandDescriptor.Default;
+
             var tb = CreateControl<CommitTextBox>(
                 CommitTextBox.CommittedTextProperty,
                 new TextToValueConverter(),
@@ -205,7 +215,8 @@ namespace Avalonia.Diagnostics.Views
                 {
                     t.Watermark = "(null)";
                 },
-                readonlyProperty: TextBox.IsReadOnlyProperty);
+                readonlyProperty: TextBox.IsReadOnlyProperty,
+                commandDescriptor: textCommand);
 
             tb.IsReadOnly |= propertyType == typeof(object) ||
                              !StringConversionHelper.CanConvertFromString(propertyType);
@@ -235,7 +246,8 @@ namespace Avalonia.Diagnostics.Views
             TControl CreateControl<TControl>(AvaloniaProperty valueProperty,
                     IValueConverter? converter = null,
                     Action<TControl>? init = null,
-                    AvaloniaProperty? readonlyProperty = null)
+                    AvaloniaProperty? readonlyProperty = null,
+                    EditorCommandDescriptor? commandDescriptor = null)
                     where TControl : Control, new()
             {
                 var control = new TControl();
@@ -251,6 +263,12 @@ namespace Avalonia.Diagnostics.Views
                         ConverterParameter = propertyType
                     }).DisposeWith(_cleanup);
 
+                var descriptor = commandDescriptor.HasValue
+                    ? EditorCommandDescriptor.Normalize(commandDescriptor.Value)
+                    : EditorCommandDescriptor.Default;
+
+                RegisterCommand(control, descriptor);
+
                 if (readonlyProperty != null)
                 {
                     control[readonlyProperty] = Property.IsReadonly;
@@ -261,6 +279,34 @@ namespace Avalonia.Diagnostics.Views
                 }
 
                 return control;
+            }
+
+            void RegisterCommand(Control control, EditorCommandDescriptor descriptor)
+            {
+                if (Property is not { } property)
+                {
+                    return;
+                }
+
+                void Activate()
+                {
+                    property.ActiveEditorCommand = descriptor;
+                }
+
+                void PointerHandler(object? sender, PointerPressedEventArgs e) => Activate();
+                void KeyHandler(object? sender, KeyEventArgs e) => Activate();
+                void FocusHandler(object? sender, GotFocusEventArgs e) => Activate();
+
+                control.PointerPressed += PointerHandler;
+                control.KeyDown += KeyHandler;
+                control.GotFocus += FocusHandler;
+
+                _cleanup.Add(Disposable.Create(() =>
+                {
+                    control.PointerPressed -= PointerHandler;
+                    control.KeyDown -= KeyHandler;
+                    control.GotFocus -= FocusHandler;
+                }));
             }
 
             static bool IsValidNumeric(Type? type)

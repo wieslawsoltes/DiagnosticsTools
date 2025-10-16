@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:avaloniaEdit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             x:Class="Avalonia.Diagnostics.Controls.MutationPreviewTextView">
+  <Border BorderThickness="1"
+          CornerRadius="2"
+          BorderBrush="{DynamicResource ThemeBorderLowBrush}">
+    <avaloniaEdit:TextEditor x:Name="Editor"
+                             IsReadOnly="True"
+                             ShowLineNumbers="True"
+                             HorizontalScrollBarVisibility="Auto"
+                             VerticalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             FontSize="12"
+                             Background="{DynamicResource ThemeBackgroundBrush}"
+                             Foreground="{DynamicResource ThemeForegroundBrush}"/>
+  </Border>
+</UserControl>

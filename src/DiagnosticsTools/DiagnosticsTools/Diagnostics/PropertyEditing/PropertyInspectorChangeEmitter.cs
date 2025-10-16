@@ -13,6 +13,7 @@ using Avalonia.Data;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Markup.Xaml;
 using Avalonia.Markup.Xaml.MarkupExtensions;
+using Avalonia.Media;
 using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.PropertyEditing
@@ -33,7 +34,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
         private readonly JsonSerializerOptions _serializerOptions;
         private readonly bool _dispatcherProvidesNotifications;
         private readonly Dictionary<MutationOriginKey, PropertyMutationOrigin> _mutationOrigins = new();
-        private readonly HashSet<string> _pendingMutationInvalidations = new(PathComparer);
+        private readonly Dictionary<string, DateTimeOffset> _pendingMutationInvalidations = new(PathComparer);
         private static readonly StringComparer PathComparer =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? StringComparer.OrdinalIgnoreCase
@@ -42,6 +43,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? StringComparison.OrdinalIgnoreCase
                 : StringComparison.Ordinal;
+        private static readonly TimeSpan MutationSuppressionWindow = TimeSpan.FromSeconds(1);
 
         internal XamlMutationDispatcher? MutationDispatcher => _dispatcher as XamlMutationDispatcher;
 
@@ -71,6 +73,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             object? newValue,
             object? previousValue,
             string gesture,
+            EditorCommandDescriptor? command = null,
             CancellationToken cancellationToken = default)
         {
             if (context is null)
@@ -83,35 +86,30 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return ChangeDispatchResult.MutationFailure(null, "Missing XAML selection.");
             }
 
-            var origin = GetOrCreateMutationOrigin(context, previousValue, out var originKey);
-            var attributeName = BuildAttributeName(context.Property);
-            var shouldUnset = ShouldUnsetAttribute(origin, newValue);
-            var valueKind = shouldUnset ? "Unset" : DetermineValueKind(newValue);
-            var bindingPayload = shouldUnset ? null : BuildBindingPayload(newValue);
-            var resourcePayload = shouldUnset ? null : BuildResourcePayload(newValue);
-            var valueText = shouldUnset ? null : DetermineAttributeValueText(context.Property, newValue, origin);
-
-            var envelope = BuildSetAttributeEnvelope(
-                context,
-                attributeName,
-                valueKind,
-                valueText,
-                bindingPayload,
-                resourcePayload,
-                shouldUnset,
-                gesture);
+            var commandDescriptor = EditorCommandDescriptor.Normalize(command);
+            var plan = BuildLocalValueMutationPlan(context, newValue, previousValue, gesture, commandDescriptor);
+            var envelope = plan.Envelope;
+            var origin = plan.Origin;
+            var originKey = plan.OriginKey;
+            var shouldUnset = plan.ShouldUnset;
+            var valueText = plan.AttributeValue;
 
             var documentPath = context.Document.Path;
+            var pendingPathAdded = false;
             if (!string.IsNullOrWhiteSpace(documentPath))
             {
-                _pendingMutationInvalidations.Add(documentPath);
+                _pendingMutationInvalidations[documentPath] = _clock().Add(MutationSuppressionWindow);
+                pendingPathAdded = true;
             }
+
+            var mutationApplied = false;
 
             try
             {
                 var result = await DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
                 if (result.Status == ChangeDispatchStatus.Success)
                 {
+                    mutationApplied = true;
                     UpdateMutationOriginBaseline(originKey, origin, shouldUnset, valueText, newValue);
                 }
 
@@ -119,11 +117,47 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
             finally
             {
-                if (!string.IsNullOrWhiteSpace(documentPath))
+                if (pendingPathAdded && !mutationApplied && !string.IsNullOrWhiteSpace(documentPath))
                 {
                     _pendingMutationInvalidations.Remove(documentPath);
                 }
             }
+        }
+
+        public async ValueTask<MutationPreviewResult> PreviewLocalValueChangeAsync(
+            PropertyChangeContext context,
+            object? newValue,
+            object? previousValue,
+            string gesture,
+            EditorCommandDescriptor? command = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (context is null)
+            {
+                throw new ArgumentNullException(nameof(context));
+            }
+
+            if (context.Descriptor is null)
+            {
+                return MutationPreviewResult.Failure(
+                    ChangeDispatchStatus.MutationFailure,
+                    "Missing XAML selection.",
+                    context.Document?.Text ?? string.Empty,
+                    Array.Empty<ChangeOperation>());
+            }
+
+            if (_dispatcher is not XamlMutationDispatcher xamlDispatcher)
+            {
+                return MutationPreviewResult.Failure(
+                    ChangeDispatchStatus.MutationFailure,
+                    "Mutation dispatcher does not support preview.",
+                    context.Document?.Text ?? string.Empty,
+                    Array.Empty<ChangeOperation>());
+            }
+
+            var commandDescriptor = EditorCommandDescriptor.Normalize(command);
+            var plan = BuildLocalValueMutationPlan(context, newValue, previousValue, gesture, commandDescriptor);
+            return await xamlDispatcher.PreviewAsync(plan.Envelope, cancellationToken).ConfigureAwait(false);
         }
 
         internal event EventHandler<MutationCompletedEventArgs>? ChangeCompleted;
@@ -147,8 +181,24 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(e.Path) && _pendingMutationInvalidations.Remove(e.Path))
+            var path = e.Path;
+            var now = _clock();
+            var pendingHit = false;
+            if (!string.IsNullOrWhiteSpace(path) && _pendingMutationInvalidations.TryGetValue(path, out var expiry))
             {
+                if (expiry >= now)
+                {
+                    pendingHit = true;
+                }
+                else
+                {
+                    _pendingMutationInvalidations.Remove(path);
+                }
+            }
+
+            if (pendingHit && path is not null)
+            {
+                _pendingMutationInvalidations[path] = now.Add(MutationSuppressionWindow);
                 return;
             }
 
@@ -169,6 +219,36 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     MutationProvenance.ExternalDocument);
                 OnExternalDocumentChanged(args);
             }
+        }
+
+        private LocalValueMutationPlan BuildLocalValueMutationPlan(
+            PropertyChangeContext context,
+            object? newValue,
+            object? previousValue,
+            string gesture,
+            EditorCommandDescriptor commandDescriptor)
+        {
+            var origin = GetOrCreateMutationOrigin(context, previousValue, out var originKey);
+            var attributeName = BuildAttributeName(context.Property);
+            var shouldUnset = ShouldUnsetAttribute(origin, newValue);
+            var valueKind = shouldUnset ? "Unset" : DetermineValueKind(newValue);
+            var bindingPayload = shouldUnset ? null : BuildBindingPayload(newValue);
+            var resourcePayload = shouldUnset ? null : BuildResourcePayload(newValue);
+            var valueText = shouldUnset ? null : DetermineAttributeValueText(context.Property, newValue, origin);
+            var adjustedCommand = EnsureCommandDescriptor(commandDescriptor, context.Property.PropertyType, newValue, gesture);
+
+            var envelope = BuildSetAttributeEnvelope(
+                context,
+                attributeName,
+                valueKind,
+                valueText,
+                bindingPayload,
+                resourcePayload,
+                shouldUnset,
+                gesture,
+                adjustedCommand);
+
+            return new LocalValueMutationPlan(envelope, origin, originKey, shouldUnset, valueText, adjustedCommand);
         }
 
         private void InvalidateMutationOrigins(string? path)
@@ -208,7 +288,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
             BindingPayload? bindingPayload,
             ResourcePayload? resourcePayload,
             bool shouldUnset,
-            string gesture)
+            string gesture,
+            EditorCommandDescriptor command)
         {
             var descriptor = context.Descriptor;
             var document = context.Document;
@@ -256,7 +337,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 Source = new ChangeSourceInfo
                 {
                     Inspector = InspectorName,
-                    Gesture = gesture
+                    Gesture = gesture,
+                    Command = command.ToCommandInfo()
                 },
                 Document = new ChangeDocumentInfo
                 {
@@ -283,6 +365,79 @@ namespace Avalonia.Diagnostics.PropertyEditing
             };
 
             return envelope;
+        }
+
+        private static EditorCommandDescriptor EnsureCommandDescriptor(
+            EditorCommandDescriptor command,
+            Type propertyType,
+            object? newValue,
+            string gesture)
+        {
+            if (!string.Equals(command.Id, EditorCommandDescriptor.Default.Id, StringComparison.Ordinal))
+            {
+                return command;
+            }
+
+            if (propertyType == typeof(bool) ||
+                propertyType == typeof(bool?) ||
+                newValue is bool ||
+                string.Equals(gesture, "ToggleCheckBox", StringComparison.Ordinal))
+            {
+                return EditorCommandDescriptor.Toggle;
+            }
+
+            if (IsNumericType(propertyType))
+            {
+                return EditorCommandDescriptor.Slider;
+            }
+
+            if (propertyType == typeof(Color) || propertyType == typeof(Color?) || string.Equals(gesture, "PickColor", StringComparison.Ordinal))
+            {
+                return EditorCommandDescriptor.ColorPicker;
+            }
+
+            if (typeof(IBinding).IsAssignableFrom(propertyType) || string.Equals(gesture, "OpenBindingEditor", StringComparison.Ordinal))
+            {
+                return EditorCommandDescriptor.BindingEditor;
+            }
+
+            return command;
+        }
+
+        private static bool IsNumericType(Type propertyType)
+        {
+            if (propertyType is null)
+            {
+                return false;
+            }
+
+            if (propertyType.IsGenericType && propertyType.GetGenericTypeDefinition() == typeof(Nullable<>))
+            {
+                propertyType = Nullable.GetUnderlyingType(propertyType)!;
+            }
+
+            if (propertyType.IsEnum)
+            {
+                return false;
+            }
+
+            switch (Type.GetTypeCode(propertyType))
+            {
+                case TypeCode.Byte:
+                case TypeCode.Decimal:
+                case TypeCode.Double:
+                case TypeCode.Int16:
+                case TypeCode.Int32:
+                case TypeCode.Int64:
+                case TypeCode.SByte:
+                case TypeCode.Single:
+                case TypeCode.UInt16:
+                case TypeCode.UInt32:
+                case TypeCode.UInt64:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private PropertyMutationOrigin GetOrCreateMutationOrigin(
@@ -651,6 +806,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 // Diagnostics notifications should not throw.
             }
         }
+
+        private readonly record struct LocalValueMutationPlan(
+            ChangeEnvelope Envelope,
+            PropertyMutationOrigin Origin,
+            MutationOriginKey OriginKey,
+            bool ShouldUnset,
+            string? AttributeValue,
+            EditorCommandDescriptor Command);
 
         private readonly record struct PropertyMutationOrigin(
             MutationOriginSnapshot Initial,

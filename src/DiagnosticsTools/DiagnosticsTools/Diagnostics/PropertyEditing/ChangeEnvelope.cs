@@ -42,6 +42,24 @@ namespace Avalonia.Diagnostics.PropertyEditing
         [JsonPropertyName("uiSessionId")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? UiSessionId { get; init; }
+
+        [JsonPropertyName("command")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ChangeSourceCommandInfo? Command { get; init; }
+    }
+
+    internal sealed class ChangeSourceCommandInfo
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = string.Empty;
+
+        [JsonPropertyName("displayName")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? DisplayName { get; init; }
+
+        [JsonPropertyName("input")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Input { get; init; }
     }
 
     internal sealed class ChangeDocumentInfo

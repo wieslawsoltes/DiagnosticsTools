@@ -477,7 +477,7 @@ namespace Avalonia.Diagnostics.ViewModels
             return runtimePreview;
         }
 
-        private void RegisterPreview(SourcePreviewViewModel preview)
+        internal void RegisterPreview(SourcePreviewViewModel preview)
         {
             if (preview is null)
             {

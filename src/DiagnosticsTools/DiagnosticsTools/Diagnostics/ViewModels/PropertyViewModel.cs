@@ -1,4 +1,5 @@
 ﻿using System;
+using Avalonia.Diagnostics.PropertyEditing;
 
 namespace Avalonia.Diagnostics.ViewModels;
 
@@ -26,4 +27,6 @@ public abstract class PropertyViewModel : ViewModelBase
     public bool IsPinned { get => _isPinned; set => RaiseAndSetIfChanged(ref _isPinned, value); }
 
     public string FullName => $"{GetType().Name.Replace("PropertyViewModel","")}:{DeclaringType?.FullName}.{Name}";
+
+    internal EditorCommandDescriptor ActiveEditorCommand { get; set; } = EditorCommandDescriptor.Default;
 }

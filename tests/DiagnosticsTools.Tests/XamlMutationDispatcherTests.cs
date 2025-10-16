@@ -43,7 +43,27 @@ public class XamlMutationDispatcherTests : IDisposable
 
         Assert.Equal(ChangeDispatchStatus.Success, result.Status);
         var updated = await File.ReadAllTextAsync(_tempFile);
-        Assert.Contains("IsChecked=\"True\"", updated); 
+        Assert.Contains("IsChecked=\"True\"", updated);
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewAsync_Provides_Preview_Text()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var preview = await dispatcher.PreviewAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, preview.Status);
+        Assert.Contains("IsChecked=\"True\"", preview.PreviewText, StringComparison.Ordinal);
     }
 
     [AvaloniaFact]
