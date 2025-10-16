@@ -17,6 +17,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Microsoft.Language.Xml;
+using Avalonia.Utilities;
 
 namespace Avalonia.Diagnostics.PropertyEditing
 {
@@ -1171,7 +1172,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             try
             {
                 var result = await _dispatcher.DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
-                var duration = Stopwatch.GetElapsedTime(startTimestamp);
+                var duration = StopwatchHelper.GetElapsedTime(startTimestamp);
                 MutationInstrumentation.RecordMutation(duration, result.Status);
                 MutationTelemetry.ReportMutation(envelope, result, duration, provenance);
                 if (!_dispatcherProvidesNotifications)
@@ -1187,7 +1188,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
             catch (Exception ex)
             {
-                var duration = Stopwatch.GetElapsedTime(startTimestamp);
+                var duration = StopwatchHelper.GetElapsedTime(startTimestamp);
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
                 MutationInstrumentation.RecordMutation(duration, failure.Status);
                 MutationTelemetry.ReportMutation(envelope, failure, duration, provenance);

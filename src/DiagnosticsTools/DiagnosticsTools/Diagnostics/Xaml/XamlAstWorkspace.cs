@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Diagnostics.PropertyEditing;
+using Avalonia.Utilities;
 
 namespace Avalonia.Diagnostics.Xaml
 {
@@ -136,7 +137,7 @@ namespace Avalonia.Diagnostics.Xaml
 
             var buildStart = Stopwatch.GetTimestamp();
             var index = XamlAstIndex.Build(document);
-            MutationInstrumentation.RecordAstIndexBuild(Stopwatch.GetElapsedTime(buildStart), "workspace", cacheHit: false);
+            MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(buildStart), "workspace", cacheHit: false);
 
             lock (_indexCacheGate)
             {
