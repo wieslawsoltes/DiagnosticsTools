@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -9,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Language.Xml;
+using Avalonia.Diagnostics.PropertyEditing;
 
 namespace Avalonia.Diagnostics.Xaml
 {
@@ -401,7 +403,9 @@ namespace Avalonia.Diagnostics.Xaml
                 {
                     if (_index is null)
                     {
+                        var buildStart = Stopwatch.GetTimestamp();
                         _index = XamlAstIndex.Build(cached);
+                        MutationInstrumentation.RecordAstIndexBuild(Stopwatch.GetElapsedTime(buildStart), "provider", cacheHit: true);
                     }
 
                     return new CachedDocumentResult(cached, _index!, null, false);
@@ -414,15 +418,22 @@ namespace Avalonia.Diagnostics.Xaml
                     {
                         if (_index is null)
                         {
+                            var buildStart = Stopwatch.GetTimestamp();
                             _index = XamlAstIndex.Build(existing);
+                            MutationInstrumentation.RecordAstIndexBuild(Stopwatch.GetElapsedTime(buildStart), "provider", cacheHit: true);
                         }
 
                         return new CachedDocumentResult(existing, _index!, null, false);
                     }
 
                     var previousIndex = _index;
+                    var loadStart = Stopwatch.GetTimestamp();
                     var document = await factory(cancellationToken).ConfigureAwait(false);
+                    MutationInstrumentation.RecordAstReload(Stopwatch.GetElapsedTime(loadStart), "provider", cacheHit: false);
+
+                    var indexStart = Stopwatch.GetTimestamp();
                     var index = XamlAstIndex.Build(document);
+                    MutationInstrumentation.RecordAstIndexBuild(Stopwatch.GetElapsedTime(indexStart), "provider", cacheHit: false);
                     _document = document;
                     _index = index;
                     return new CachedDocumentResult(document, index, previousIndex, true);
@@ -444,7 +455,9 @@ namespace Avalonia.Diagnostics.Xaml
 
                 if (_index is null)
                 {
+                    var buildStart = Stopwatch.GetTimestamp();
                     _index = XamlAstIndex.Build(document);
+                    MutationInstrumentation.RecordAstIndexBuild(Stopwatch.GetElapsedTime(buildStart), "provider", cacheHit: true);
                 }
 
                 index = _index;

@@ -5,9 +5,11 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Avalonia.Headless.XUnit;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Microsoft.Language.Xml;
 using Xunit;
 using System.Linq;
@@ -121,6 +123,185 @@ public class PropertyInspectorChangeEmitterTests
         Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
         Assert.Equal("Unset", operation.Payload.ValueKind);
         Assert.Null(operation.Payload.NewValue);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Recognizes_Binding_Revert()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <TextBlock x:Name="Label" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "TextBlock");
+
+        var target = new DummyAvaloniaObject();
+        var context = new PropertyChangeContext(
+            target,
+            TextBlock.TextProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+
+        var previousBinding = new Binding("Title");
+        var newBinding = new Binding("Title");
+
+        await emitter.EmitLocalValueChangeAsync(context, newBinding, previousBinding, "SetBinding");
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        var operation = Assert.Single(envelope!.Changes);
+        Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
+        Assert.Equal("Unset", operation.Payload.ValueKind);
+        Assert.Null(operation.Payload.NewValue);
+        Assert.Null(operation.Payload.Binding);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Recognizes_StaticResource_Revert()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <Border x:Name="Frame" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "Border");
+
+        var target = new DummyAvaloniaObject();
+        var context = new PropertyChangeContext(
+            target,
+            Border.BackgroundProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+
+        var previousResource = new StaticResourceExtension("AccentBrush");
+        var newResource = new StaticResourceExtension("AccentBrush");
+
+        await emitter.EmitLocalValueChangeAsync(context, newResource, previousResource, "SetStaticResource");
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        var operation = Assert.Single(envelope!.Changes);
+        Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
+        Assert.Equal("Unset", operation.Payload.ValueKind);
+        Assert.Null(operation.Payload.NewValue);
+        Assert.Null(operation.Payload.Resource);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Restores_Whitespace_When_Reverting()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <Border x:Name="Frame" Margin="4,  8,16, 32" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "Border");
+
+        var target = new DummyAvaloniaObject();
+        var context = new PropertyChangeContext(
+            target,
+            Border.MarginProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+
+        var originalThickness = new Thickness(4, 8, 16, 32);
+        var updatedThickness = new Thickness(10, 20, 30, 40);
+
+        await emitter.EmitLocalValueChangeAsync(context, updatedThickness, originalThickness, "SetMargin");
+        await emitter.EmitLocalValueChangeAsync(context, originalThickness, updatedThickness, "SetMargin");
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        var operation = Assert.Single(envelope!.Changes);
+        Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
+        Assert.Equal("Literal", operation.Payload.ValueKind);
+        Assert.Equal("4,  8,16, 32", operation.Payload.NewValue);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Emits_Telemetry()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "CheckBox");
+
+        var target = new DummyAvaloniaObject();
+        var context = new PropertyChangeContext(
+            target,
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+        var telemetrySink = new RecordingTelemetrySink();
+        MutationTelemetry.RegisterSink(telemetrySink);
+
+        try
+        {
+            await emitter.EmitLocalValueChangeAsync(context, true, false, "ToggleCheckBox");
+
+            var events = telemetrySink.Events;
+            var telemetry = Assert.Single(events);
+            Assert.Equal("PropertyEditor", telemetry.Inspector);
+            Assert.Equal("ToggleCheckBox", telemetry.Gesture);
+            Assert.Equal(ChangeDispatchStatus.Success, telemetry.Outcome);
+            Assert.Equal(1, telemetry.ChangeCount);
+            Assert.Contains("SetAttribute", telemetry.ChangeTypes);
+            Assert.Contains("Literal", telemetry.ValueKinds);
+        }
+        finally
+        {
+            MutationTelemetry.UnregisterSink(telemetrySink);
+        }
     }
 
     [AvaloniaFact]
@@ -250,6 +431,35 @@ public class PropertyInspectorChangeEmitterTests
         {
             LastEnvelope = envelope;
             return ValueTask.FromResult(ChangeDispatchResult.Success());
+        }
+    }
+
+    private sealed class RecordingTelemetrySink : IMutationTelemetrySink
+    {
+        private readonly List<MutationTelemetryEvent> _events = new();
+
+        public IReadOnlyList<MutationTelemetryEvent> Events
+        {
+            get
+            {
+                lock (_events)
+                {
+                    return _events.ToArray();
+                }
+            }
+        }
+
+        public void Report(MutationTelemetryEvent telemetryEvent)
+        {
+            if (telemetryEvent is null)
+            {
+                return;
+            }
+
+            lock (_events)
+            {
+                _events.Add(telemetryEvent);
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -1165,10 +1166,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
         private async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken)
         {
             var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
+            var startTimestamp = Stopwatch.GetTimestamp();
 
             try
             {
                 var result = await _dispatcher.DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
+                var duration = Stopwatch.GetElapsedTime(startTimestamp);
+                MutationInstrumentation.RecordMutation(duration, result.Status);
+                MutationTelemetry.ReportMutation(envelope, result, duration, provenance);
                 if (!_dispatcherProvidesNotifications)
                 {
                     OnChangeCompleted(new MutationCompletedEventArgs(envelope, result, provenance));
@@ -1182,7 +1187,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
             catch (Exception ex)
             {
+                var duration = Stopwatch.GetElapsedTime(startTimestamp);
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
+                MutationInstrumentation.RecordMutation(duration, failure.Status);
+                MutationTelemetry.ReportMutation(envelope, failure, duration, provenance);
                 OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure, provenance));
                 return failure;
             }

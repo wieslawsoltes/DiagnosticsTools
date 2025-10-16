@@ -12,6 +12,9 @@ namespace Avalonia.Diagnostics.Metrics
             public const string UiArrangeTime = "avalonia.ui.arrange.time";
             public const string UiRenderTime = "avalonia.ui.render.time";
             public const string UiInputTime = "avalonia.ui.input.time";
+            public const string DiagnosticsMutationDuration = "avalonia.diag.mutation.duration";
+            public const string DiagnosticsAstReloadDuration = "avalonia.diag.ast.reload.time";
+            public const string DiagnosticsAstIndexBuildDuration = "avalonia.diag.ast.index.time";
         }
 
         public static class Gauges
@@ -19,6 +22,11 @@ namespace Avalonia.Diagnostics.Metrics
             public const string UiEventHandlerCount = "avalonia.ui.event.handler.count";
             public const string UiVisualCount = "avalonia.ui.visual.count";
             public const string UiDispatcherTimerCount = "avalonia.ui.dispatcher.timer.count";
+        }
+
+        public static class Counters
+        {
+            public const string DiagnosticsMutationGuardFailures = "avalonia.diag.mutation.guard.failures";
         }
 
         public static class Activities

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Diagnostics.PropertyEditing;
@@ -269,6 +270,48 @@ public class XamlMutationDispatcherTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task DispatchAsync_Applies_Namespace_And_Attribute_Envelope()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <ContentControl x:Name="Host" />
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = Assert.Single(index.Nodes, n => string.Equals(n.LocalName, "ContentControl", StringComparison.Ordinal));
+
+        var captureDispatcher = new CapturingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(captureDispatcher);
+
+        var context = new PropertyChangeContext(
+            new ContentControl(),
+            ContentControl.ContentProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        await emitter.EmitLocalValueChangeAsync(context, "{local:DemoContent}", null, "SetLocalValue");
+
+        var envelope = captureDispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        Assert.Contains(envelope!.Changes, operation => operation.Type == ChangeOperationTypes.SetNamespace);
+        Assert.Contains(envelope.Changes, operation => operation.Type == ChangeOperationTypes.SetAttribute);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("xmlns:local=\"clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls\"", updated, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{local:DemoContent}\"", updated, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
     public async Task UndoAsync_Reverts_Last_Mutation()
     {
         var initial = """
@@ -319,6 +362,54 @@ public class XamlMutationDispatcherTests : IDisposable
         Assert.Equal(ChangeDispatchStatus.Success, redoResult.Status);
         var updated = await File.ReadAllTextAsync(_tempFile);
         Assert.Contains("IsChecked=\"True\"", updated, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public async Task UndoRedo_Succeed_After_Workspace_Reload()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = Assert.Single(index.Nodes, n => string.Equals(n.LocalName, "CheckBox", StringComparison.Ordinal));
+
+        var context = new PropertyChangeContext(
+            new DummyAvaloniaObject(),
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatchResult = await emitter.EmitLocalValueChangeAsync(context, true, false, "ToggleCheckBox");
+        Assert.Equal(ChangeDispatchStatus.Success, dispatchResult.Status);
+        Assert.True(dispatcher.CanUndo);
+
+        await workspace.GetDocumentAsync(_tempFile);
+        await workspace.GetIndexAsync(_tempFile);
+
+        var undoResult = await dispatcher.UndoAsync();
+        Assert.Equal(ChangeDispatchStatus.Success, undoResult.Status);
+        var reverted = await File.ReadAllTextAsync(_tempFile);
+        Assert.DoesNotContain("IsChecked", reverted, StringComparison.Ordinal);
+        Assert.True(dispatcher.CanRedo);
+
+        await workspace.GetDocumentAsync(_tempFile);
+        await workspace.GetIndexAsync(_tempFile);
+
+        var redoResult = await dispatcher.RedoAsync();
+        Assert.Equal(ChangeDispatchStatus.Success, redoResult.Status);
+        var redone = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("IsChecked=\"True\"", redone, StringComparison.Ordinal);
     }
 
     [Fact]
