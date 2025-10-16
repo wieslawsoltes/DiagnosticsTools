@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -38,6 +39,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
         private readonly bool _dispatcherProvidesNotifications;
         private readonly Dictionary<MutationOriginKey, PropertyMutationOrigin> _mutationOrigins = new();
         private readonly Dictionary<string, DateTimeOffset> _pendingMutationInvalidations = new(PathComparer);
+        private readonly object _mutationOriginsGate = new();
+        private readonly object _pendingMutationInvalidationsGate = new();
         private static readonly StringComparer PathComparer =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? StringComparer.OrdinalIgnoreCase
@@ -111,7 +114,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
                 if (pendingPaths.Add(path))
                 {
-                    _pendingMutationInvalidations[path] = _clock().Add(MutationSuppressionWindow);
+                    TrackPendingMutationInvalidation(path, _clock().Add(MutationSuppressionWindow));
                 }
             }
 
@@ -142,7 +145,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 {
                     foreach (var path in pendingPaths)
                     {
-                        _pendingMutationInvalidations.Remove(path);
+                        RemovePendingMutationInvalidation(path);
                     }
                 }
             }
@@ -213,22 +216,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             var path = e.Path;
             var now = _clock();
-            var pendingHit = false;
-            if (!string.IsNullOrWhiteSpace(path) && _pendingMutationInvalidations.TryGetValue(path, out var expiry))
-            {
-                if (expiry >= now)
-                {
-                    pendingHit = true;
-                }
-                else
-                {
-                    _pendingMutationInvalidations.Remove(path);
-                }
-            }
+            var pendingHit = TryExtendPendingMutationInvalidation(path, now);
 
-            if (pendingHit && path is not null)
+            if (pendingHit)
             {
-                _pendingMutationInvalidations[path] = now.Add(MutationSuppressionWindow);
                 return;
             }
 
@@ -249,6 +240,56 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     MutationProvenance.ExternalDocument);
                 OnExternalDocumentChanged(args);
             }
+        }
+
+        private void TrackPendingMutationInvalidation(string path, DateTimeOffset expiry)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            lock (_pendingMutationInvalidationsGate)
+            {
+                _pendingMutationInvalidations[path] = expiry;
+            }
+        }
+
+        private void RemovePendingMutationInvalidation(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            lock (_pendingMutationInvalidationsGate)
+            {
+                _pendingMutationInvalidations.Remove(path);
+            }
+        }
+
+        private bool TryExtendPendingMutationInvalidation(string? path, DateTimeOffset now)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            lock (_pendingMutationInvalidationsGate)
+            {
+                if (_pendingMutationInvalidations.TryGetValue(path, out var expiry))
+                {
+                    if (expiry >= now)
+                    {
+                        _pendingMutationInvalidations[path] = now.Add(MutationSuppressionWindow);
+                        return true;
+                    }
+
+                    _pendingMutationInvalidations.Remove(path);
+                }
+            }
+
+            return false;
         }
 
         private static IReadOnlyList<(PropertyChangeContext Context, object? PreviousValue)> BuildMutationTargets(
@@ -636,30 +677,33 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         private void InvalidateMutationOrigins(string? path)
         {
-            if (_mutationOrigins.Count == 0)
+            lock (_mutationOriginsGate)
             {
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                _mutationOrigins.Clear();
-                return;
-            }
-
-            var keysToRemove = new List<MutationOriginKey>();
-
-            foreach (var key in _mutationOrigins.Keys)
-            {
-                if (string.Equals(key.DocumentPath, path, PathComparison))
+                if (_mutationOrigins.Count == 0)
                 {
-                    keysToRemove.Add(key);
+                    return;
                 }
-            }
 
-            foreach (var key in keysToRemove)
-            {
-                _mutationOrigins.Remove(key);
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    _mutationOrigins.Clear();
+                    return;
+                }
+
+                var keysToRemove = new List<MutationOriginKey>();
+
+                foreach (var key in _mutationOrigins.Keys.ToArray())
+                {
+                    if (string.Equals(key.DocumentPath, path, PathComparison))
+                    {
+                        keysToRemove.Add(key);
+                    }
+                }
+
+                foreach (var key in keysToRemove)
+                {
+                    _mutationOrigins.Remove(key);
+                }
             }
         }
 
@@ -870,21 +914,24 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 context.Descriptor.Id.ToString(),
                 context.Property);
 
-            if (_mutationOrigins.TryGetValue(key, out var origin))
+            lock (_mutationOriginsGate)
             {
-                var updatedCurrent = origin.Current.WithRuntimeValue(previousValue);
-                origin = origin with { Current = updatedCurrent };
-                _mutationOrigins[key] = origin;
-                return origin;
+                if (_mutationOrigins.TryGetValue(key, out var origin))
+                {
+                    var updatedCurrent = origin.Current.WithRuntimeValue(previousValue);
+                    origin = origin with { Current = updatedCurrent };
+                    _mutationOrigins[key] = origin;
+                    return origin;
+                }
+
+                var attributeName = BuildAttributeName(context.Property);
+                var snapshot = CaptureAttributeSnapshot(context.Document, context.Descriptor, attributeName);
+
+                var initial = new MutationOriginSnapshot(snapshot.Exists, snapshot.Value, previousValue);
+                var newOrigin = new PropertyMutationOrigin(initial, initial);
+                _mutationOrigins[key] = newOrigin;
+                return newOrigin;
             }
-
-            var attributeName = BuildAttributeName(context.Property);
-            var snapshot = CaptureAttributeSnapshot(context.Document, context.Descriptor, attributeName);
-
-            var initial = new MutationOriginSnapshot(snapshot.Exists, snapshot.Value, previousValue);
-            var newOrigin = new PropertyMutationOrigin(initial, initial);
-            _mutationOrigins[key] = newOrigin;
-            return newOrigin;
         }
 
         private static string BuildAttributeName(AvaloniaProperty property)
@@ -1072,7 +1119,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
             object? runtimeValue)
         {
             var updatedSnapshot = new MutationOriginSnapshot(!shouldUnset, attributeValue, runtimeValue);
-            _mutationOrigins[key] = origin with { Current = updatedSnapshot };
+            lock (_mutationOriginsGate)
+            {
+                _mutationOrigins[key] = origin with { Current = updatedSnapshot };
+            }
         }
 
         private static string? ExtractAttributeValue(string text, TextSpan span)
