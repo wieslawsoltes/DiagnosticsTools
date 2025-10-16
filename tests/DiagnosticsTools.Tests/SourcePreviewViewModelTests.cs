@@ -1,12 +1,17 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Threading;
 using Microsoft.Language.Xml;
 using Xunit;
 
@@ -178,6 +183,86 @@ public class SourcePreviewViewModelTests
         Assert.Same(buttonDescriptor, viewModel.AstSelection?.Node);
     }
 
+    [Fact]
+    public async Task WorkspaceDiagnosticsUpdate_PropagatesToErrorMessage()
+    {
+        var (document, index) = CreateDocument();
+        var provider = new TestXamlAstProvider();
+        provider.SetDocument(document);
+        var workspace = new XamlAstWorkspace(provider);
+        var descriptor = index.Nodes.First(node => node.LocalName == "Button");
+        var selection = new XamlAstSelection(document, descriptor, index.Nodes.ToList());
+        var navigator = new StubSourceNavigator();
+        var info = CreateSourceInfo(document.Path);
+        var viewModel = new SourcePreviewViewModel(info, navigator, selection, xamlAstWorkspace: workspace);
+
+        await viewModel.LoadAsync();
+        Assert.Null(viewModel.ErrorMessage);
+
+        var diagnostics = new[]
+        {
+            new XamlAstDiagnostic(new TextSpan(0, 1), XamlDiagnosticSeverity.Error, ERRID.ERR_None, "Parse failure")
+        };
+        var errorDocument = BuildDocument(document.Text, document.Path, document.Version.TimestampUtc.AddSeconds(1), diagnostics);
+        provider.RaiseDocumentChanged(errorDocument);
+
+        await FlushDispatcherAsync();
+
+        Assert.Equal("Parse failure", viewModel.ErrorMessage);
+
+        var cleanDocument = BuildDocument(document.Text, document.Path, errorDocument.Version.TimestampUtc.AddSeconds(1));
+        provider.RaiseDocumentChanged(cleanDocument);
+
+        await FlushDispatcherAsync();
+        await FlushDispatcherAsync();
+
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task WorkspaceNodesChanged_RefreshesSelectionAndSnippet()
+    {
+        var (document, index) = CreateDocument();
+        var provider = new TestXamlAstProvider();
+        provider.SetDocument(document);
+        var workspace = new XamlAstWorkspace(provider);
+        var descriptor = index.Nodes.First(node => node.LocalName == "Button");
+        var selection = new XamlAstSelection(document, descriptor, index.Nodes.ToList());
+        var navigator = new StubSourceNavigator();
+        var info = CreateSourceInfo(document.Path);
+        var viewModel = new SourcePreviewViewModel(info, navigator, selection, xamlAstWorkspace: workspace);
+
+        await viewModel.LoadAsync();
+        Assert.Equal(document.Text, viewModel.Snippet);
+
+        var updatedXaml = """
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid>
+    <Border x:Name="RuntimeBorder" />
+    <Button x:Name="Foo" Content="Baz" />
+  </Grid>
+</UserControl>
+""";
+        var updatedDocument = BuildDocument(updatedXaml, document.Path, document.Version.TimestampUtc.AddSeconds(1));
+        var updatedIndex = XamlAstIndex.Build(updatedDocument);
+        var changes = XamlAstNodeDiffer.Diff(index, updatedIndex);
+        provider.SetDocument(updatedDocument);
+        provider.RaiseNodesChanged(updatedDocument.Path, updatedDocument.Version, changes);
+
+        for (var attempt = 0; attempt < 5 && viewModel.Snippet != updatedDocument.Text; attempt++)
+        {
+            await FlushDispatcherAsync();
+        }
+
+        var updatedDescriptor = updatedIndex.Nodes.First(node => node.LocalName == "Button");
+
+        Assert.NotNull(viewModel.AstSelection);
+        Assert.Equal(updatedDocument.Version, viewModel.AstSelection?.Document.Version);
+        Assert.Equal(updatedDescriptor.Span, viewModel.AstSelection?.Node?.Span);
+        Assert.Equal(updatedDocument.Text, viewModel.Snippet);
+    }
+
     private static SourceInfo CreateSourceInfo(string path) =>
         new(path, null, 1, 1, 1, 1, SourceOrigin.Local);
 
@@ -194,6 +279,13 @@ public class SourcePreviewViewModelTests
   </Grid>
 </UserControl>
 """;
+        var document = BuildDocument(xaml, "/tmp/MainWindow.axaml");
+        var index = XamlAstIndex.Build(document);
+        return (document, index);
+    }
+
+    private static XamlAstDocument BuildDocument(string xaml, string path, DateTimeOffset? timestamp = null, IReadOnlyList<XamlAstDiagnostic>? diagnostics = null)
+    {
         var normalized = xaml.Replace("\r\n", "\n");
         if (!ReferenceEquals(normalized, xaml))
         {
@@ -201,12 +293,10 @@ public class SourcePreviewViewModelTests
         }
 
         var syntax = Parser.ParseText(xaml);
-        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        diagnostics ??= XamlDiagnosticMapper.CollectDiagnostics(syntax);
         var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(xaml)));
-        var version = new XamlDocumentVersion(DateTimeOffset.UtcNow, xaml.Length, checksum);
-        var document = new XamlAstDocument("/tmp/MainWindow.axaml", xaml, syntax, version, diagnostics);
-        var index = XamlAstIndex.Build(document);
-        return (document, index);
+        var version = new XamlDocumentVersion(timestamp ?? DateTimeOffset.UtcNow, xaml.Length, checksum);
+        return new XamlAstDocument(path, xaml, syntax, version, diagnostics);
     }
 
     private static void ResetSplitState()
@@ -237,5 +327,77 @@ public class SourcePreviewViewModelTests
         var field = typeof(SourcePreviewViewModel).GetField("_suppressSplitEnabledPersistence", BindingFlags.Instance | BindingFlags.NonPublic)
                     ?? throw new InvalidOperationException("Field _suppressSplitEnabledPersistence not found.");
         field.SetValue(vm, suppress);
+    }
+
+    private static async Task FlushDispatcherAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+    }
+
+    private sealed class TestXamlAstProvider : IXamlAstProvider
+    {
+        private static readonly StringComparer PathComparer = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
+        private readonly Dictionary<string, XamlAstDocument> _documents = new(PathComparer);
+
+        public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
+        public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
+
+        public void SetDocument(XamlAstDocument document)
+        {
+            if (document is null)
+            {
+                throw new ArgumentNullException(nameof(document));
+            }
+
+            _documents[Normalize(document.Path)] = document;
+        }
+
+        public ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
+        {
+            if (!_documents.TryGetValue(Normalize(path), out var document))
+            {
+                throw new FileNotFoundException(path);
+            }
+
+            return new ValueTask<XamlAstDocument>(document);
+        }
+
+        public void Invalidate(string path)
+        {
+        }
+
+        public void InvalidateAll()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public void RaiseDocumentChanged(XamlAstDocument document)
+        {
+            SetDocument(document);
+            DocumentChanged?.Invoke(this, new XamlDocumentChangedEventArgs(document.Path, XamlDocumentChangeKind.Updated, document));
+        }
+
+        public void RaiseNodesChanged(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstNodeChange> changes)
+        {
+            NodesChanged?.Invoke(this, new XamlAstNodesChangedEventArgs(path, version, changes));
+        }
+
+        private static string Normalize(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch
+            {
+                return path;
+            }
+        }
     }
 }

@@ -160,6 +160,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 _inlinePreview?.DetachFromMutationOwner();
+                _inlinePreview?.DetachFromWorkspace();
                 RaiseAndSetIfChanged(ref _inlinePreview, value);
             }
         }
@@ -201,7 +202,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel)
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel, xamlAstWorkspace: _mainViewModel?.XamlAstWorkspace)
                         : SourcePreviewViewModel.CreateUnavailable(Description, _sourceNavigator, mutationOwner: _mainViewModel);
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
@@ -225,7 +226,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            var preview = new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel);
+            var preview = new SourcePreviewViewModel(info, _sourceNavigator, mutationOwner: _mainViewModel, xamlAstWorkspace: _mainViewModel?.XamlAstWorkspace);
             InlinePreview = preview;
             _ = preview.LoadAsync();
         }
@@ -233,6 +234,7 @@ namespace Avalonia.Diagnostics.ViewModels
         internal void DetachMutationObserver()
         {
             _inlinePreview?.DetachFromMutationOwner();
+            _inlinePreview?.DetachFromWorkspace();
         }
 
         internal void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)

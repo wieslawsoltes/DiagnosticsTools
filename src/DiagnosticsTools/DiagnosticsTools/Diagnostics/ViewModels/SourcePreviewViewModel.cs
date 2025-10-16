@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
+using System.Linq;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
@@ -47,6 +48,13 @@ namespace Avalonia.Diagnostics.ViewModels
         private static SourcePreviewSplitOrientation s_lastOrientation = SourcePreviewSplitOrientation.Horizontal;
         private MainViewModel? _mutationOwner;
         private bool _isApplyingTreeSelection;
+        private readonly XamlAstWorkspace? _xamlAstWorkspace;
+        private string? _normalizedDocumentPath;
+        private bool _workspaceSubscribed;
+        private static readonly StringComparer PathComparer =
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
 
         public SourcePreviewViewModel(
             SourceInfo sourceInfo,
@@ -56,7 +64,8 @@ namespace Avalonia.Diagnostics.ViewModels
             Action<XamlAstSelection?>? synchronizeSelection = null,
             HttpClient? httpClient = null,
             string? initialErrorMessage = null,
-            MainViewModel? mutationOwner = null)
+            MainViewModel? mutationOwner = null,
+            XamlAstWorkspace? xamlAstWorkspace = null)
         {
             SourceInfo = sourceInfo ?? throw new ArgumentNullException(nameof(sourceInfo));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
@@ -64,6 +73,11 @@ namespace Avalonia.Diagnostics.ViewModels
             AstSelection = astSelection;
             _navigateToAst = navigateToAst;
             _synchronizeSelection = synchronizeSelection;
+            _xamlAstWorkspace = xamlAstWorkspace;
+            if (_xamlAstWorkspace is not null)
+            {
+                SubscribeToWorkspace();
+            }
             if (mutationOwner is not null)
             {
                 AttachToMutationOwner(mutationOwner);
@@ -98,6 +112,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 () => CanNavigateToAst);
             _revealNavigationTarget = new SourcePreviewNavigationTarget("Reveal in Tree", _revealInTreeCommand);
             RefreshNavigationState();
+            RefreshDocumentPathFromSelection(astSelection);
         }
 
         public SourceInfo SourceInfo { get; }
@@ -399,6 +414,18 @@ namespace Avalonia.Diagnostics.ViewModels
             _mutationOwner = null;
         }
 
+        internal void DetachFromWorkspace()
+        {
+            if (!_workspaceSubscribed || _xamlAstWorkspace is null)
+            {
+                return;
+            }
+
+            _xamlAstWorkspace.NodesChanged -= HandleWorkspaceNodesChanged;
+            _xamlAstWorkspace.DiagnosticsChanged -= HandleWorkspaceDiagnosticsChanged;
+            _workspaceSubscribed = false;
+        }
+
         internal void UpdateSelectionFromTree(XamlAstSelection? selection)
         {
             if (!Dispatcher.UIThread.CheckAccess())
@@ -426,13 +453,14 @@ namespace Avalonia.Diagnostics.ViewModels
                     ApplyHighlightForCurrentSelection();
                     RefreshNavigationState();
                 }
-                finally
-                {
-                    _isApplyingTreeSelection = false;
-                }
-
-                return;
+            finally
+            {
+                _isApplyingTreeSelection = false;
             }
+
+            RefreshDocumentPathFromSelection(null);
+            return;
+        }
 
             var currentDocument = AstSelection?.Document;
             var newDocument = selection.Document;
@@ -460,6 +488,8 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 _isApplyingTreeSelection = false;
             }
+
+            RefreshDocumentPathFromSelection(selection);
         }
 
         internal void NotifyEditorSelectionChanged(XamlAstNodeDescriptor? descriptor)
@@ -489,6 +519,196 @@ namespace Avalonia.Diagnostics.ViewModels
             RefreshNavigationState();
 
             _synchronizeSelection?.Invoke(AstSelection);
+        }
+
+        private void SubscribeToWorkspace()
+        {
+            if (_xamlAstWorkspace is null || _workspaceSubscribed)
+            {
+                return;
+            }
+
+            _xamlAstWorkspace.NodesChanged += HandleWorkspaceNodesChanged;
+            _xamlAstWorkspace.DiagnosticsChanged += HandleWorkspaceDiagnosticsChanged;
+            _workspaceSubscribed = true;
+        }
+
+        private void HandleWorkspaceNodesChanged(object? sender, XamlAstNodesChangedEventArgs e)
+        {
+            if (e is null || !IsEventForCurrentDocument(e.Path))
+            {
+                return;
+            }
+
+            async Task RefreshAsync()
+            {
+                var snapshot = await BuildSelectionSnapshotAsync(e).ConfigureAwait(false);
+                if (snapshot is null)
+                {
+                    return;
+                }
+
+                UpdateSelectionFromTree(snapshot);
+            }
+
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                _ = RefreshAsync();
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(() => _ = RefreshAsync(), DispatcherPriority.Background);
+            }
+        }
+
+        private void HandleWorkspaceDiagnosticsChanged(object? sender, XamlDiagnosticsChangedEventArgs e)
+        {
+            if (e is null || !IsEventForCurrentDocument(e.Path))
+            {
+                return;
+            }
+
+            void Apply() => ApplyDiagnostics(e.Diagnostics);
+
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                Apply();
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(Apply, DispatcherPriority.Background);
+            }
+        }
+
+        private async Task<XamlAstSelection?> BuildSelectionSnapshotAsync(XamlAstNodesChangedEventArgs args)
+        {
+            if (_xamlAstWorkspace is null || string.IsNullOrWhiteSpace(_normalizedDocumentPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                var document = await _xamlAstWorkspace.GetDocumentAsync(_normalizedDocumentPath!).ConfigureAwait(false);
+                var index = await _xamlAstWorkspace.GetIndexAsync(_normalizedDocumentPath!).ConfigureAwait(false);
+                var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
+
+                XamlAstNodeDescriptor? node = null;
+                var currentNode = AstSelection?.Node;
+
+                if (currentNode is not null)
+                {
+                    var replacement = ResolveReplacementDescriptor(currentNode, args);
+                    if (replacement is null && index.TryGetDescriptor(currentNode.Id, out var descriptor))
+                    {
+                        replacement = descriptor;
+                    }
+
+                    node = replacement;
+                }
+
+                return new XamlAstSelection(document, node, descriptors);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private XamlAstNodeDescriptor? ResolveReplacementDescriptor(XamlAstNodeDescriptor currentNode, XamlAstNodesChangedEventArgs args)
+        {
+            foreach (var change in args.Changes)
+            {
+                if (change.Kind == XamlAstNodeChangeKind.Removed &&
+                    change.OldNode is not null &&
+                    change.OldNode.Id.Equals(currentNode.Id))
+                {
+                    return null;
+                }
+
+                if (change.NewNode is not null &&
+                    change.NewNode.Id.Equals(currentNode.Id))
+                {
+                    return change.NewNode;
+                }
+
+                if (change.OldNode is not null &&
+                    change.OldNode.Id.Equals(currentNode.Id) &&
+                    change.NewNode is not null)
+                {
+                    return change.NewNode;
+                }
+            }
+
+            return currentNode;
+        }
+
+        private void ApplyDiagnostics(IReadOnlyList<XamlAstDiagnostic> diagnostics)
+        {
+            if (diagnostics is null || diagnostics.Count == 0)
+            {
+                if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    ErrorMessage = null;
+                    if (!_hasManualSnippet && !IsLoading)
+                    {
+                        _ = LoadAsync();
+                    }
+                }
+
+                return;
+            }
+
+            var primary = diagnostics.FirstOrDefault(d => d.Severity == XamlDiagnosticSeverity.Error)
+                          ?? diagnostics.FirstOrDefault(d => d.Severity == XamlDiagnosticSeverity.Warning)
+                          ?? diagnostics[0];
+
+            if (primary is null || string.IsNullOrWhiteSpace(primary.Message) ||
+                string.Equals(ErrorMessage, primary.Message, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SetErrorMessage(primary.Message);
+        }
+
+        private bool IsEventForCurrentDocument(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrEmpty(_normalizedDocumentPath))
+            {
+                return false;
+            }
+
+            var normalized = NormalizePath(path);
+            if (normalized is null)
+            {
+                return false;
+            }
+
+            return PathComparer.Equals(_normalizedDocumentPath!, normalized);
+        }
+
+        private void RefreshDocumentPathFromSelection(XamlAstSelection? selection)
+        {
+            var candidate = selection?.Document?.Path ?? SourceInfo.LocalPath;
+            _normalizedDocumentPath = NormalizePath(candidate);
+        }
+
+        private static string? NormalizePath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch
+            {
+                return path;
+            }
         }
 
         private async Task ReloadAfterMutationAsync()

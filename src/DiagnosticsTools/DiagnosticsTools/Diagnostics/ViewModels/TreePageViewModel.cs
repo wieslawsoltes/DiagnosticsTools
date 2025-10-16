@@ -81,6 +81,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
             _changeEmitter = null;
             _xamlAstWorkspace.DocumentChanged += OnXamlDocumentChanged;
+            _xamlAstWorkspace.NodesChanged += OnXamlNodesChanged;
             PropertiesFilter = new FilterViewModel();
             PropertiesFilter.RefreshFilter += (s, e) => Details?.PropertiesView?.Refresh();
 
@@ -297,6 +298,7 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             _xamlAstWorkspace.DocumentChanged -= OnXamlDocumentChanged;
+            _xamlAstWorkspace.NodesChanged -= OnXamlNodesChanged;
 
             if (_details is not null)
             {
@@ -306,6 +308,15 @@ namespace Avalonia.Diagnostics.ViewModels
 
             lock (_previewObserversGate)
             {
+                foreach (var reference in _previewObservers)
+                {
+                    if (reference.TryGetTarget(out var target) && target is not null)
+                    {
+                        target.DetachFromWorkspace();
+                        target.DetachFromMutationOwner();
+                    }
+                }
+
                 _previewObservers.Clear();
             }
         }
@@ -360,7 +371,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     var context = node.Visual?.GetType().Name ?? node.Type;
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, SynchronizeSelectionFromPreview, mutationOwner: MainView)
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, SynchronizeSelectionFromPreview, mutationOwner: MainView, xamlAstWorkspace: _xamlAstWorkspace)
                         : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator, mutationOwner: MainView);
                     if (info is not null)
                     {
@@ -1424,6 +1435,39 @@ namespace Avalonia.Diagnostics.ViewModels
             return null;
         }
 
+        private void OnXamlNodesChanged(object? sender, XamlAstNodesChangedEventArgs e)
+        {
+            if (e is null || string.IsNullOrEmpty(e.Path))
+            {
+                return;
+            }
+
+            var currentPath = ResolveSelectedDocumentPath();
+            if (string.IsNullOrWhiteSpace(currentPath) || !PathsEqual(currentPath!, e.Path))
+            {
+                return;
+            }
+
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode), DispatcherPriority.Background);
+            }
+            else
+            {
+                _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+            }
+        }
+
+        private string? ResolveSelectedDocumentPath()
+        {
+            if (SelectedNodeSourceInfo?.LocalPath is { } localPath && !string.IsNullOrWhiteSpace(localPath))
+            {
+                return localPath!;
+            }
+
+            return SelectedNodeXaml?.Document?.Path;
+        }
+
         private void OnXamlDocumentChanged(object? sender, XamlDocumentChangedEventArgs e)
         {
             if (SelectedNode is null)
@@ -1431,7 +1475,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            var currentPath = SelectedNodeSourceInfo?.LocalPath;
+            var currentPath = ResolveSelectedDocumentPath();
             if (string.IsNullOrWhiteSpace(currentPath))
             {
                 return;

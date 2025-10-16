@@ -77,6 +77,7 @@ namespace Avalonia.Diagnostics.Views
             {
                 _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 _viewModel.DetachFromMutationOwner();
+                _viewModel.DetachFromWorkspace();
             }
 
             _viewModel = DataContext as SourcePreviewViewModel;
@@ -348,6 +349,7 @@ namespace Avalonia.Diagnostics.Views
             {
                 _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 _viewModel.DetachFromMutationOwner();
+                _viewModel.DetachFromWorkspace();
                 _viewModel = null;
             }
 

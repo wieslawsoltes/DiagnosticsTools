@@ -65,6 +65,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly EventHandler<WorkspaceChangeEventArgs>? _workspaceChangedHandler;
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
 
+        internal XamlAstWorkspace XamlAstWorkspace => _xamlAstWorkspace;
+
         public MainViewModel(AvaloniaObject root, ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator, Workspace? roslynWorkspace = null)
         {
             _root = root;
