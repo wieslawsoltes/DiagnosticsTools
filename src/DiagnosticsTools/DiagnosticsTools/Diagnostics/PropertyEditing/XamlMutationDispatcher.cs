@@ -22,6 +22,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 ? StringComparison.OrdinalIgnoreCase
                 : StringComparison.Ordinal;
 
+        internal XamlAstWorkspace Workspace => _workspace;
+
         internal XamlMutationDispatcher(XamlAstWorkspace workspace, Workspace? roslynWorkspace = null)
         {
             _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
