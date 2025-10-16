@@ -887,6 +887,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private async Task<MutationPreviewDecision> ShowMutationPreviewAsync(PropertyChangeContext context, MutationPreviewResult preview)
         {
+            if (preview.Status == ChangeDispatchStatus.Success)
+            {
+                return MutationPreviewDecision.Apply;
+            }
+
             if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime lifetime ||
                 lifetime.MainWindow is not Window owner)
             {
