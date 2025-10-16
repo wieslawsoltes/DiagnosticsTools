@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Security;
 using System.Text;
 using Avalonia.Diagnostics.Xaml;
 using Microsoft.Language.Xml;
@@ -46,6 +48,18 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 case ChangeOperationTypes.RenameResource:
                     return TryBuildRenameResourceEdits(document, index, operation, edits, out failure);
 
+                case ChangeOperationTypes.RenameElement:
+                    return TryBuildRenameElementEdits(document, index, operation, edits, out failure);
+
+                case ChangeOperationTypes.ReorderNode:
+                    return TryBuildReorderNodeEdits(document, index, operation, edits, out failure);
+
+                case ChangeOperationTypes.SetNamespace:
+                    return TryBuildSetNamespaceEdits(document, index, operation, edits, out failure);
+
+                case ChangeOperationTypes.SetContentText:
+                    return TryBuildSetContentTextEdits(document, index, operation, edits, out failure);
+
                 default:
                     failure = ChangeDispatchResult.MutationFailure(
                         operation.Id,
@@ -87,6 +101,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 operation.Id,
                 "Attribute span hash mismatch.",
                 out failure))
+            {
+                return false;
+            }
+
+            if (payload.Name.Contains('.') &&
+                !ValidateParentGuard(document, index, descriptor, operation, out failure))
             {
                 return false;
             }
@@ -402,6 +422,384 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     {
                         return false;
                     }
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryBuildRenameElementEdits(
+            XamlAstDocument document,
+            IXamlAstIndex index,
+            ChangeOperation operation,
+            List<XamlTextEdit> edits,
+            out ChangeDispatchResult failure)
+        {
+            failure = default;
+
+            if (!TryGetDescriptor(index, operation, out var descriptor, out failure))
+            {
+                return false;
+            }
+
+            var payload = operation.Payload;
+            if (payload is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Missing payload for RenameElement operation.");
+                return false;
+            }
+
+            var newName = payload.NewValue;
+            if (string.IsNullOrWhiteSpace(newName))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "RenameElement requires a non-empty newValue.");
+                return false;
+            }
+
+            if (string.Equals(descriptor.QualifiedName, newName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!ValidateSpanHash(
+                operation.Guard?.SpanHash,
+                () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                operation.Id,
+                "Element span hash mismatch.",
+                out failure))
+            {
+                return false;
+            }
+
+            if (!XamlGuardUtilities.TryLocateNode(document, descriptor, out var node, out _)
+                || node is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Target element not found in syntax tree.");
+                return false;
+            }
+
+            switch (node)
+            {
+                case XmlElementSyntax element:
+                {
+                    var startSpan = element.StartTag.NameNode.Span;
+                    edits.Add(new XamlTextEdit(startSpan.Start, startSpan.Length, newName));
+
+                    if (element.EndTag is { NameNode: { } endName })
+                    {
+                        var endSpan = endName.Span;
+                        edits.Add(new XamlTextEdit(endSpan.Start, endSpan.Length, newName));
+                    }
+
+                    return true;
+                }
+
+                case XmlEmptyElementSyntax emptyElement:
+                {
+                    var span = emptyElement.NameNode.Span;
+                    edits.Add(new XamlTextEdit(span.Start, span.Length, newName));
+                    return true;
+                }
+
+                default:
+                    failure = ChangeDispatchResult.MutationFailure(operation.Id, "RenameElement supports element nodes only.");
+                    return false;
+            }
+        }
+
+        private static bool TryBuildReorderNodeEdits(
+            XamlAstDocument document,
+            IXamlAstIndex index,
+            ChangeOperation operation,
+            List<XamlTextEdit> edits,
+            out ChangeDispatchResult failure)
+        {
+            failure = default;
+
+            if (!TryGetDescriptor(index, operation, out var descriptor, out failure))
+            {
+                return false;
+            }
+
+            var payload = operation.Payload;
+            if (payload?.NewIndex is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "ReorderNode requires a newIndex payload value.");
+                return false;
+            }
+
+            var newIndex = payload.NewIndex.Value;
+            if (newIndex < 0)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "ReorderNode newIndex must be non-negative.");
+                return false;
+            }
+
+            if (!ValidateSpanHash(
+                operation.Guard?.SpanHash,
+                () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                operation.Id,
+                "Node span hash mismatch.",
+                out failure))
+            {
+                return false;
+            }
+
+            if (!ValidateParentGuard(document, index, descriptor, operation, out failure))
+            {
+                return false;
+            }
+
+            if (!XamlGuardUtilities.TryLocateNode(document, descriptor, out var node, out var parentNode)
+                || node is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Target node not found in syntax tree.");
+                return false;
+            }
+
+            var parentElement = GetOwningElement(parentNode);
+            if (parentElement is null)
+            {
+                var parentType = parentNode?.GetType().FullName ?? "<null parent>";
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, $"ReorderNode requires an element parent (found {parentType}).");
+                return false;
+            }
+
+            var children = parentElement.Elements.ToList();
+            var childrenCount = children.Count;
+            if (childrenCount == 0)
+            {
+                return true;
+            }
+
+            var pathSegments = descriptor.Path;
+            var pathCount = pathSegments.Count;
+            var currentIndex = pathCount > 0 ? pathSegments[pathCount - 1] : children.FindIndex(c => c.AsNode.Span == node.Span);
+            if (currentIndex < 0 || currentIndex >= childrenCount)
+            {
+                currentIndex = children.FindIndex(child => child.AsNode.Span == node.Span);
+            }
+
+            if (currentIndex < 0)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to determine current child index for reorder.");
+                return false;
+            }
+
+            if (currentIndex == newIndex)
+            {
+                return true;
+            }
+
+            var boundedIndex = Math.Min(newIndex, childrenCount - 1);
+
+            if (boundedIndex < 0)
+            {
+                boundedIndex = 0;
+            }
+
+            var removalEdit = BuildNodeRemovalEdit(document.Text, node.Span);
+            var fragment = document.Text.Substring(removalEdit.Start, removalEdit.Length);
+            edits.Add(removalEdit);
+
+            int insertionIndex;
+
+            if (boundedIndex < currentIndex)
+            {
+                var targetNode = children[boundedIndex].AsNode;
+                insertionIndex = targetNode.Span.Start;
+            }
+            else
+            {
+                if (boundedIndex >= childrenCount - 1)
+                {
+                    insertionIndex = DetermineChildInsertionPosition(parentElement, childrenCount);
+                }
+                else
+                {
+                    var anchorNode = children[boundedIndex].AsNode;
+                    insertionIndex = MovePastTrailingWhitespace(document.Text, anchorNode.Span.End);
+                }
+            }
+
+            edits.Add(new XamlTextEdit(insertionIndex, 0, fragment));
+            return true;
+        }
+
+        private static bool TryBuildSetNamespaceEdits(
+            XamlAstDocument document,
+            IXamlAstIndex index,
+            ChangeOperation operation,
+            List<XamlTextEdit> edits,
+            out ChangeDispatchResult failure)
+        {
+            failure = default;
+
+            if (!TryGetDescriptor(index, operation, out var descriptor, out failure))
+            {
+                return false;
+            }
+
+            var payload = operation.Payload;
+            if (payload is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Missing payload for SetNamespace operation.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(payload.Name))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetNamespace requires a namespace name.");
+                return false;
+            }
+
+            var attributeName = payload.Name!;
+
+            if (!attributeName.StartsWith("xmlns", StringComparison.Ordinal))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Namespace attributes must begin with 'xmlns'.");
+                return false;
+            }
+
+            if (!ValidateSpanHash(
+                operation.Guard?.SpanHash,
+                () => XamlGuardUtilities.ComputeAttributeHash(document, descriptor, attributeName),
+                operation.Id,
+                "Namespace span hash mismatch.",
+                out failure))
+            {
+                return false;
+            }
+
+            if (!XamlGuardUtilities.TryLocateAttribute(document, descriptor, attributeName, out var attribute, out var ownerNode))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to locate namespace owning element.");
+                return false;
+            }
+
+            var newValue = payload.NewValue;
+            if (string.IsNullOrWhiteSpace(newValue))
+            {
+                if (attribute is null)
+                {
+                    return true;
+                }
+
+                edits.Add(BuildAttributeRemovalEdit(document.Text, attribute.Span));
+                return true;
+            }
+
+            if (attribute is not null && attribute.ValueNode is { } valueNode)
+            {
+                var text = document.Text;
+                var valueSpan = valueNode.Span;
+                var original = text.Substring(valueSpan.Start, valueSpan.Length);
+                var quote = DetermineQuoteCharacter(original);
+                var replacement = string.Concat(quote, newValue, quote);
+                edits.Add(new XamlTextEdit(valueSpan.Start, valueSpan.Length, replacement));
+                return true;
+            }
+
+            if (ownerNode is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to determine namespace insertion point.");
+                return false;
+            }
+
+            var insertionIndex = DetermineAttributeInsertionIndex(ownerNode);
+            if (insertionIndex < 0)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to determine namespace insertion location.");
+                return false;
+            }
+
+            var attributeText = BuildAttributeInsertionText(document.Text, insertionIndex, attributeName, newValue);
+            edits.Add(new XamlTextEdit(insertionIndex, 0, attributeText));
+            return true;
+        }
+
+        private static bool TryBuildSetContentTextEdits(
+            XamlAstDocument document,
+            IXamlAstIndex index,
+            ChangeOperation operation,
+            List<XamlTextEdit> edits,
+            out ChangeDispatchResult failure)
+        {
+            failure = default;
+
+            if (!TryGetDescriptor(index, operation, out var descriptor, out failure))
+            {
+                return false;
+            }
+
+            var payload = operation.Payload;
+            if (payload is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Missing payload for SetContentText operation.");
+                return false;
+            }
+
+            if (!ValidateSpanHash(
+                operation.Guard?.SpanHash,
+                () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                operation.Id,
+                "Node span hash mismatch.",
+                out failure))
+            {
+                return false;
+            }
+
+            if (!XamlGuardUtilities.TryLocateNode(document, descriptor, out var node, out _)
+                || node is not XmlElementSyntax element)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetContentText requires a non-empty element.");
+                return false;
+            }
+
+            var newText = payload.NewValue ?? string.Empty;
+            var escapedText = EscapeContentText(newText);
+
+            if (element.Elements.Any())
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetContentText cannot be applied to elements with child elements.");
+                return false;
+            }
+
+            var textNodes = new List<XmlTextSyntax>();
+            foreach (var contentNode in element.Content)
+            {
+                if (contentNode is XmlTextSyntax textNode)
+                {
+                    textNodes.Add(textNode);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(escapedText))
+            {
+                if (textNodes.Count > 0)
+                {
+                    var primary = textNodes[0];
+                    if (!string.Equals(document.Text.Substring(primary.Span.Start, primary.Span.Length), escapedText, StringComparison.Ordinal))
+                    {
+                        edits.Add(new XamlTextEdit(primary.Span.Start, primary.Span.Length, escapedText));
+                    }
+
+                    for (var i = 1; i < textNodes.Count; i++)
+                    {
+                        edits.Add(BuildNodeRemovalEdit(document.Text, textNodes[i].Span));
+                    }
+                }
+                else
+                {
+                    var insertionIndex = element.StartTag.GreaterThanToken.Span.End;
+                    edits.Add(new XamlTextEdit(insertionIndex, 0, escapedText));
+                }
+            }
+            else
+            {
+                foreach (var textNode in textNodes)
+                {
+                    edits.Add(BuildNodeRemovalEdit(document.Text, textNode.Span));
                 }
             }
 
@@ -916,6 +1314,49 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 _ => -1
             };
 
+        private static int MovePastTrailingWhitespace(string text, int index)
+        {
+            while (index < text.Length)
+            {
+                var ch = text[index];
+                if (ch == ' ' || ch == '\t')
+                {
+                    index++;
+                    continue;
+                }
+
+                if (ch == '\r')
+                {
+                    index++;
+                    if (index < text.Length && text[index] == '\n')
+                    {
+                        index++;
+                    }
+                    break;
+                }
+
+                if (ch == '\n')
+                {
+                    index++;
+                    break;
+                }
+
+                break;
+            }
+
+            return index;
+        }
+
+        private static string EscapeContentText(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            return SecurityElement.Escape(value) ?? string.Empty;
+        }
+
         private static string DetermineLineEnding(string text)
         {
             var index = text.IndexOf('\n');
@@ -930,6 +1371,21 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
 
             return "\n";
+        }
+
+        private static XmlElementSyntax? GetOwningElement(SyntaxNode? node)
+        {
+            while (node is not null)
+            {
+                if (node is XmlElementSyntax element)
+                {
+                    return element;
+                }
+
+                node = node.Parent;
+            }
+
+            return null;
         }
 
         private static string GetIndentation(string text, int position)

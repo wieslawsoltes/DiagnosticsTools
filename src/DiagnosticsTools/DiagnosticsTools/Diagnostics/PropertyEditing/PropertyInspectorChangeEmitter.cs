@@ -670,11 +670,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             public override int GetHashCode()
             {
-                var hash = new HashCode();
-                hash.Add(DocumentPath, StringComparer.Ordinal);
-                hash.Add(DescriptorId, StringComparer.Ordinal);
-                hash.Add(Property);
-                return hash.ToHashCode();
+                unchecked
+                {
+                    var hash = 17;
+                    hash = (hash * 23) + StringComparer.Ordinal.GetHashCode(DocumentPath);
+                    hash = (hash * 23) + StringComparer.Ordinal.GetHashCode(DescriptorId);
+                    hash = (hash * 23) + Property.GetHashCode();
+                    return hash;
+                }
             }
         }
     }
@@ -686,5 +689,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
         public const string RemoveNode = "RemoveNode";
         public const string ReorderNode = "ReorderNode";
         public const string RenameResource = "RenameResource";
+        public const string RenameElement = "RenameElement";
+        public const string SetNamespace = "SetNamespace";
+        public const string SetContentText = "SetContentText";
     }
 }

@@ -371,6 +371,194 @@ public class XamlMutationDispatcherTests : IDisposable
         Assert.DoesNotContain("PrimaryBrush\"", updated, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task DispatchAsync_Renames_Element_Node()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <Grid x:Name="LayoutRoot">
+  </Grid>
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateRenameElementEnvelopeAsync(workspace, oldName: "Grid", newName: "StackPanel");
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("<StackPanel x:Name=\"LayoutRoot\">", updated, StringComparison.Ordinal);
+        Assert.Contains("</StackPanel>", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Grid", updated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_Sets_Namespace_Declaration()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <StackPanel />
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateNamespaceEnvelopeAsync(workspace, "xmlns:controls", "clr-namespace:MyApp.Controls");
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("xmlns:controls=\"clr-namespace:MyApp.Controls\"", updated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_Updates_Content_Text()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <TextBlock>Hello</TextBlock>
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateContentTextEnvelopeAsync(workspace, "TextBlock", "Updated");
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("<TextBlock>Updated</TextBlock>", updated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_Reorders_Child_Node()
+    {
+        var initial = """
+<StackPanel xmlns="https://github.com/avaloniaui">
+  <Button Content="One" />
+  <Button Content="Two" />
+  <Button Content="Three" />
+</StackPanel>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateReorderEnvelopeAsync(workspace, contentValue: "Three", newIndex: 0);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        var normalized = updated.Replace("\r\n", "\n");
+        var firstOccurrence = normalized.IndexOf("Three", StringComparison.Ordinal);
+        var secondOccurrence = normalized.IndexOf("One", StringComparison.Ordinal);
+        Assert.True(firstOccurrence < secondOccurrence);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_Applies_Batched_Changes()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <Grid>
+    <TextBlock>Hello</TextBlock>
+  </Grid>
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var gridDescriptor = index.Nodes.Single(n => string.Equals(n.LocalName, "Grid", StringComparison.Ordinal));
+        var textDescriptor = index.Nodes.Single(n => string.Equals(n.LocalName, "TextBlock", StringComparison.Ordinal));
+
+        var renameOperation = new ChangeOperation
+        {
+            Id = "op-1",
+            Type = ChangeOperationTypes.RenameElement,
+            Target = new ChangeTarget
+            {
+                DescriptorId = gridDescriptor.Id.ToString(),
+                Path = gridDescriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                NewValue = "StackPanel"
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = XamlGuardUtilities.ComputeNodeHash(document, gridDescriptor)
+            }
+        };
+
+        var textOperation = new ChangeOperation
+        {
+            Id = "op-2",
+            Type = ChangeOperationTypes.SetContentText,
+            Target = new ChangeTarget
+            {
+                DescriptorId = textDescriptor.Id.ToString(),
+                Path = textDescriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                NewValue = "World"
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = XamlGuardUtilities.ComputeNodeHash(document, textDescriptor)
+            }
+        };
+
+        var envelope = new ChangeEnvelope
+        {
+            BatchId = Guid.NewGuid(),
+            InitiatedAt = DateTimeOffset.UtcNow,
+            Source = new ChangeSourceInfo { Inspector = "PropertyEditor", Gesture = "RenameAndSetContent" },
+            Document = new ChangeDocumentInfo
+            {
+                Path = document.Path,
+                Encoding = "utf-8",
+                Version = document.Version.ToString(),
+                Mode = "Writable"
+            },
+            Context = new ChangeContextInfo
+            {
+                ElementId = gridDescriptor.Id.ToString(),
+                AstNodeId = gridDescriptor.Id.ToString(),
+                Property = gridDescriptor.LocalName,
+                PropertyPath = gridDescriptor.LocalName,
+                Frame = "LocalValue",
+                ValueSource = "LocalValue"
+            },
+            Guards = new ChangeGuardsInfo
+            {
+                DocumentVersion = document.Version.ToString()
+            },
+            Changes = new[] { renameOperation, textOperation }
+        };
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        var updated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("<StackPanel>", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Grid>", updated, StringComparison.Ordinal);
+        Assert.Contains("<TextBlock>World</TextBlock>", updated, StringComparison.Ordinal);
+    }
+
     private static (AdhocWorkspace Workspace, DocumentId DocumentId) CreateWorkspaceWithDocument(string path, string content)
     {
         var host = MefHostServices.Create(MefHostServices.DefaultAssemblies);
@@ -514,6 +702,186 @@ public class XamlMutationDispatcherTests : IDisposable
         };
 
         return CreateEnvelope(document, descriptor, operation, gesture);
+    }
+
+    private async Task<ChangeEnvelope> CreateRenameElementEnvelopeAsync(
+        XamlAstWorkspace workspace,
+        string oldName,
+        string newName)
+    {
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = index.Nodes.Single(n => string.Equals(n.LocalName, oldName, StringComparison.Ordinal));
+        var spanHash = XamlGuardUtilities.ComputeNodeHash(document, descriptor);
+
+        var operation = new ChangeOperation
+        {
+            Id = "op-1",
+            Type = ChangeOperationTypes.RenameElement,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.ToString(),
+                Path = descriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                NewValue = newName
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = spanHash
+            }
+        };
+
+        return CreateEnvelope(document, descriptor, operation, "RenameElement");
+    }
+
+    private async Task<ChangeEnvelope> CreateNamespaceEnvelopeAsync(
+        XamlAstWorkspace workspace,
+        string attributeName,
+        string value)
+    {
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = index.Nodes.First();
+        var spanHash = XamlGuardUtilities.ComputeAttributeHash(document, descriptor, attributeName);
+
+        var operation = new ChangeOperation
+        {
+            Id = "op-1",
+            Type = ChangeOperationTypes.SetNamespace,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.ToString(),
+                Path = descriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                Name = attributeName,
+                NewValue = value
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = spanHash
+            }
+        };
+
+        return CreateEnvelope(document, descriptor, operation, "SetNamespace");
+    }
+
+    private async Task<ChangeEnvelope> CreateContentTextEnvelopeAsync(
+        XamlAstWorkspace workspace,
+        string elementName,
+        string newValue)
+    {
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = index.Nodes.Single(n => string.Equals(n.LocalName, elementName, StringComparison.Ordinal));
+        var spanHash = XamlGuardUtilities.ComputeNodeHash(document, descriptor);
+
+        var operation = new ChangeOperation
+        {
+            Id = "op-1",
+            Type = ChangeOperationTypes.SetContentText,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.ToString(),
+                Path = descriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                NewValue = newValue
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = spanHash
+            }
+        };
+
+        return CreateEnvelope(document, descriptor, operation, "SetContentText");
+    }
+
+    private async Task<ChangeEnvelope> CreateReorderEnvelopeAsync(
+        XamlAstWorkspace workspace,
+        string contentValue,
+        int newIndex)
+    {
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = index.Nodes.Single(
+            n => string.Equals(n.LocalName, "Button", StringComparison.Ordinal) &&
+                 n.Attributes.Any(a => string.Equals(a.FullName, "Content", StringComparison.Ordinal) &&
+                                       string.Equals(a.Value, contentValue, StringComparison.Ordinal)));
+
+        var spanHash = XamlGuardUtilities.ComputeNodeHash(document, descriptor);
+        var parentDescriptor = FindParentDescriptor(index, descriptor);
+
+        var operation = new ChangeOperation
+        {
+            Id = "op-1",
+            Type = ChangeOperationTypes.ReorderNode,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.ToString(),
+                Path = descriptor.LocalName,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                NewIndex = newIndex
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = spanHash,
+                ParentSpanHash = parentDescriptor is null ? null : XamlGuardUtilities.ComputeNodeHash(document, parentDescriptor)
+            }
+        };
+
+        return CreateEnvelope(document, descriptor, operation, "ReorderChild");
+    }
+
+    private static XamlAstNodeDescriptor? FindParentDescriptor(IXamlAstIndex index, XamlAstNodeDescriptor descriptor)
+    {
+        var path = descriptor.Path;
+        if (path.Count <= 1)
+        {
+            return null;
+        }
+
+        var expectedDepth = path.Count - 1;
+        foreach (var candidate in index.Nodes)
+        {
+            if (candidate.Path.Count != expectedDepth)
+            {
+                continue;
+            }
+
+            var matches = true;
+            for (var i = 0; i < expectedDepth; i++)
+            {
+                if (candidate.Path[i] != path[i])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (!matches)
+            {
+                continue;
+            }
+
+            if (candidate.Span.Start <= descriptor.Span.Start &&
+                candidate.Span.End >= descriptor.Span.End)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static ChangeEnvelope CreateEnvelope(

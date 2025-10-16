@@ -78,14 +78,24 @@ namespace Avalonia.Diagnostics.PropertyEditing
             XamlAstNodeDescriptor descriptor,
             out SyntaxNode? node)
         {
+            return TryLocateNode(document, descriptor, out node, out _);
+        }
+
+        public static bool TryLocateNode(
+            XamlAstDocument document,
+            XamlAstNodeDescriptor descriptor,
+            out SyntaxNode? node,
+            out SyntaxNode? parent)
+        {
             node = null;
+            parent = null;
 
             if (document.Syntax.RootSyntax is not SyntaxNode root)
             {
                 return false;
             }
 
-            node = FindNodeBySpan(root, descriptor.Span);
+            node = FindNodeBySpan(root, descriptor.Span, out parent);
             return node is not null;
         }
 
@@ -143,22 +153,34 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return null;
         }
 
-        private static SyntaxNode? FindNodeBySpan(SyntaxNode node, TextSpan span)
+        private static SyntaxNode? FindNodeBySpan(SyntaxNode node, TextSpan span) =>
+            FindNodeBySpan(node, span, out _);
+
+        private static SyntaxNode? FindNodeBySpan(SyntaxNode node, TextSpan span, out SyntaxNode? parent) =>
+            FindNodeBySpanCore(node, span, null, out parent);
+
+        private static SyntaxNode? FindNodeBySpanCore(
+            SyntaxNode current,
+            TextSpan span,
+            SyntaxNode? parent,
+            out SyntaxNode? foundParent)
         {
-            if (node.Span.Start == span.Start && node.Span.End == span.End)
+            if (current.Span.Start == span.Start && current.Span.End == span.End)
             {
-                return node;
+            foundParent = parent;
+                return current;
             }
 
-            foreach (var child in node.ChildNodes)
+            foreach (var child in current.ChildNodes)
             {
-                var match = FindNodeBySpan(child, span);
+                var match = FindNodeBySpanCore(child, span, current, out foundParent);
                 if (match is not null)
                 {
                     return match;
                 }
             }
 
+            foundParent = null;
             return null;
         }
 
