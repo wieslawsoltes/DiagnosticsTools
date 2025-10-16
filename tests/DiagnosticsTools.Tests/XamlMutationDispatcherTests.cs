@@ -48,6 +48,83 @@ public class XamlMutationDispatcherTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task DispatchAsync_Preserves_Utf8_Bom()
+    {
+        var initial = """
+<?xml version="1.0"?>
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await WriteTextAsync(_tempFile, initial, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        Assert.Null(result.Message);
+
+        var bytes = await File.ReadAllBytesAsync(_tempFile);
+        Assert.True(bytes.Length >= 3);
+        Assert.Equal(0xEF, bytes[0]);
+        Assert.Equal(0xBB, bytes[1]);
+        Assert.Equal(0xBF, bytes[2]);
+    }
+
+    [AvaloniaFact]
+    public async Task DispatchAsync_Preserves_Utf16_Encoding()
+    {
+        var initial = """
+<?xml version="1.0" encoding="utf-16"?>
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await WriteTextAsync(_tempFile, initial, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        Assert.Null(result.Message);
+
+        var bytes = await File.ReadAllBytesAsync(_tempFile);
+        Assert.True(bytes.Length >= 2);
+        Assert.Equal(0xFF, bytes[0]);
+        Assert.Equal(0xFE, bytes[1]);
+    }
+
+    [AvaloniaFact]
+    public async Task DispatchAsync_Warns_When_Encoding_Unknown()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await WriteTextAsync(_tempFile, initial, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        using var workspace = new XamlAstWorkspace();
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
+
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var result = await dispatcher.DispatchAsync(envelope);
+
+        Assert.Equal(ChangeDispatchStatus.Success, result.Status);
+        Assert.Null(result.Message);
+
+        var bytes = await File.ReadAllBytesAsync(_tempFile);
+        var hasBom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        Assert.False(hasBom);
+    }
+
+    [AvaloniaFact]
     public async Task PreviewAsync_Provides_Preview_Text()
     {
         var initial = """
@@ -668,6 +745,12 @@ public class XamlMutationDispatcherTests : IDisposable
         Assert.Contains("<StackPanel>", updated, StringComparison.Ordinal);
         Assert.DoesNotContain("<Grid>", updated, StringComparison.Ordinal);
         Assert.Contains("<TextBlock>World</TextBlock>", updated, StringComparison.Ordinal);
+    }
+
+    private static async Task WriteTextAsync(string path, string content, Encoding encoding)
+    {
+        await using var writer = new StreamWriter(path, append: false, encoding);
+        await writer.WriteAsync(content);
     }
 
     private static (AdhocWorkspace Workspace, DocumentId DocumentId) CreateWorkspaceWithDocument(string path, string content)

@@ -19,6 +19,7 @@ using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Microsoft.Language.Xml;
 using Avalonia.Utilities;
+using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.PropertyEditing
 {
@@ -214,6 +215,21 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return;
             }
 
+            var uiDispatcher = Dispatcher.UIThread;
+            if (!uiDispatcher.CheckAccess())
+            {
+                var marshaledArgs = new XamlDocumentChangedEventArgs(e.Path, e.Kind, e.Document, e.Error);
+                uiDispatcher.Post(
+                    () => ProcessWorkspaceDocumentChanged(marshaledArgs),
+                    DispatcherPriority.Background);
+                return;
+            }
+
+            ProcessWorkspaceDocumentChanged(e);
+        }
+
+        private void ProcessWorkspaceDocumentChanged(XamlDocumentChangedEventArgs e)
+        {
             var path = e.Path;
             var now = _clock();
             var pendingHit = TryExtendPendingMutationInvalidation(path, now);

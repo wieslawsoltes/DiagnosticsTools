@@ -17,7 +17,9 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         public string? Message { get; }
 
-        public static ChangeDispatchResult Success() => new(ChangeDispatchStatus.Success);
+        public static ChangeDispatchResult Success() => Success(message: null);
+
+        public static ChangeDispatchResult Success(string? message) => new(ChangeDispatchStatus.Success, null, message);
 
         public static ChangeDispatchResult GuardFailure(string? operationId, string? message = null) =>
             new(ChangeDispatchStatus.GuardFailure, operationId, message);

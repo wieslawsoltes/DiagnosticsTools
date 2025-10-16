@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -7,6 +8,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Diagnostics.PropertyEditing;
@@ -27,6 +29,7 @@ namespace Avalonia.Diagnostics.Xaml
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(PathComparer);
         private readonly CancellationTokenSource _disposeCancellation = new();
         private bool _disposed;
+        private static readonly Regex XmlEncodingRegex = new(@"encoding\s*=\s*['""](?<encoding>[^'""]+)['""]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
         public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
@@ -160,7 +163,8 @@ namespace Avalonia.Diagnostics.Xaml
                 bufferSize: 4096,
                 useAsync: true);
 
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
+            var encodingInfo = DetectEncoding(stream);
+            using var reader = new StreamReader(stream, encodingInfo.Encoding, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
             var content = await reader.ReadToEndAsync().ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -174,7 +178,7 @@ namespace Avalonia.Diagnostics.Xaml
             var currentLength = stream.Length > 0 ? stream.Length : lengthHint;
             var version = new XamlDocumentVersion(currentTimestamp, currentLength, checksum);
 
-            return new XamlAstDocument(path, content, syntax, version, diagnostics);
+            return new XamlAstDocument(path, content, syntax, version, diagnostics, encodingInfo.Encoding, encodingInfo.HasByteOrderMark, encodingInfo.IsFallback);
         }
 
         private void EnsureWatcherFor(string normalizedPath)
@@ -342,6 +346,156 @@ namespace Avalonia.Diagnostics.Xaml
             var hash = sha256.ComputeHash(stream);
             stream.Position = 0;
             return ToHex(hash);
+        }
+
+        private static EncodingDetectionResult DetectEncoding(FileStream stream)
+        {
+            if (stream is null)
+            {
+                throw new ArgumentNullException(nameof(stream));
+            }
+
+            var preamble = new byte[4];
+            var bytesRead = stream.Read(preamble, 0, preamble.Length);
+            stream.Position = 0;
+
+            if (bytesRead >= 4)
+            {
+                if (preamble[0] == 0x00 && preamble[1] == 0x00 && preamble[2] == 0xFE && preamble[3] == 0xFF)
+                {
+                    return new EncodingDetectionResult(new UTF32Encoding(bigEndian: true, byteOrderMark: true), hasByteOrderMark: true, isFallback: false);
+                }
+
+                if (preamble[0] == 0xFF && preamble[1] == 0xFE && preamble[2] == 0x00 && preamble[3] == 0x00)
+                {
+                    return new EncodingDetectionResult(new UTF32Encoding(bigEndian: false, byteOrderMark: true), hasByteOrderMark: true, isFallback: false);
+                }
+            }
+
+            if (bytesRead >= 3 && preamble[0] == 0xEF && preamble[1] == 0xBB && preamble[2] == 0xBF)
+            {
+                return new EncodingDetectionResult(new UTF8Encoding(true), hasByteOrderMark: true, isFallback: false);
+            }
+
+            if (bytesRead >= 2)
+            {
+                if (preamble[0] == 0xFE && preamble[1] == 0xFF)
+                {
+                    return new EncodingDetectionResult(new UnicodeEncoding(bigEndian: true, byteOrderMark: true), hasByteOrderMark: true, isFallback: false);
+                }
+
+                if (preamble[0] == 0xFF && preamble[1] == 0xFE)
+                {
+                    return new EncodingDetectionResult(new UnicodeEncoding(bigEndian: false, byteOrderMark: true), hasByteOrderMark: true, isFallback: false);
+                }
+            }
+
+            var encodingName = TryReadXmlEncoding(stream);
+            if (!string.IsNullOrWhiteSpace(encodingName))
+            {
+                try
+                {
+                    var encoding = CreateEncodingFromName(encodingName, emitByteOrderMark: false);
+                    return new EncodingDetectionResult(encoding, hasByteOrderMark: false, isFallback: false);
+                }
+                catch (ArgumentException)
+                {
+                    // Unknown encoding declaration, fall through to UTF-8 fallback.
+                }
+            }
+
+            return new EncodingDetectionResult(new UTF8Encoding(false), hasByteOrderMark: false, isFallback: true);
+        }
+
+        private static string? TryReadXmlEncoding(FileStream stream)
+        {
+            var maxBytes = (int)Math.Min(stream.Length, 512);
+            if (maxBytes <= 0)
+            {
+                return null;
+            }
+
+            var pooled = ArrayPool<byte>.Shared.Rent(maxBytes);
+            try
+            {
+                var bytesRead = stream.Read(pooled, 0, maxBytes);
+                stream.Position = 0;
+                if (bytesRead <= 0)
+                {
+                    return null;
+                }
+
+                var prefix = Encoding.ASCII.GetString(pooled, 0, bytesRead);
+                var match = XmlEncodingRegex.Match(prefix);
+                if (match.Success)
+                {
+                    return match.Groups["encoding"].Value;
+                }
+
+                return null;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(pooled);
+                stream.Position = 0;
+            }
+        }
+
+        private static Encoding CreateEncodingFromName(string name, bool emitByteOrderMark)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("Encoding name must not be null or whitespace.", nameof(name));
+            }
+
+            var normalized = name.Trim().Trim('"', '\'');
+
+            if (normalized.Equals("utf-8", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("utf8", StringComparison.OrdinalIgnoreCase))
+            {
+                return new UTF8Encoding(emitByteOrderMark);
+            }
+
+            if (normalized.Equals("utf-16", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("utf-16le", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("unicode", StringComparison.OrdinalIgnoreCase))
+            {
+                return new UnicodeEncoding(bigEndian: false, byteOrderMark: emitByteOrderMark);
+            }
+
+            if (normalized.Equals("utf-16be", StringComparison.OrdinalIgnoreCase))
+            {
+                return new UnicodeEncoding(bigEndian: true, byteOrderMark: emitByteOrderMark);
+            }
+
+            if (normalized.Equals("utf-32", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("utf-32le", StringComparison.OrdinalIgnoreCase))
+            {
+                return new UTF32Encoding(bigEndian: false, byteOrderMark: emitByteOrderMark);
+            }
+
+            if (normalized.Equals("utf-32be", StringComparison.OrdinalIgnoreCase))
+            {
+                return new UTF32Encoding(bigEndian: true, byteOrderMark: emitByteOrderMark);
+            }
+
+            return Encoding.GetEncoding(normalized);
+        }
+
+        private readonly struct EncodingDetectionResult
+        {
+            public EncodingDetectionResult(Encoding encoding, bool hasByteOrderMark, bool isFallback)
+            {
+                Encoding = encoding ?? throw new ArgumentNullException(nameof(encoding));
+                HasByteOrderMark = hasByteOrderMark;
+                IsFallback = isFallback;
+            }
+
+            public Encoding Encoding { get; }
+
+            public bool HasByteOrderMark { get; }
+
+            public bool IsFallback { get; }
         }
 
         private static string ToHex(byte[] bytes)

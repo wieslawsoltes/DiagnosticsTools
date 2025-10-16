@@ -106,7 +106,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return failure;
             }
 
-            var persistenceResult = await PersistAsync(path, updatedText, cancellationToken).ConfigureAwait(false);
+            var persistenceResult = await PersistAsync(path, updatedText, document, cancellationToken).ConfigureAwait(false);
             if (persistenceResult.Status == ChangeDispatchStatus.Success)
             {
                 _journal.Record(new MutationEntry(path, document.Text, updatedText, envelope));
@@ -123,7 +123,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return ChangeDispatchResult.MutationFailure(null, "No mutations to undo.");
             }
 
-            var result = await PersistAsync(entry.Path, entry.Before, cancellationToken).ConfigureAwait(false);
+            var result = await PersistAsync(entry.Path, entry.Before, null, cancellationToken).ConfigureAwait(false);
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushRedo(entry);
@@ -144,7 +144,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return ChangeDispatchResult.MutationFailure(null, "No mutations to redo.");
             }
 
-            var result = await PersistAsync(entry.Path, entry.After, cancellationToken).ConfigureAwait(false);
+            var result = await PersistAsync(entry.Path, entry.After, null, cancellationToken).ConfigureAwait(false);
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushUndo(entry);
@@ -230,8 +230,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
-        private async Task<ChangeDispatchResult> PersistAsync(string path, string content, CancellationToken cancellationToken)
+        private async Task<ChangeDispatchResult> PersistAsync(string path, string content, XamlAstDocument? document, CancellationToken cancellationToken)
         {
+            var encodingInfo = await ResolveEncodingInfoAsync(path, document, cancellationToken).ConfigureAwait(false);
+
             var (handledByWorkspace, workspaceResult) = await TryPersistWithWorkspaceAsync(path, content, cancellationToken).ConfigureAwait(false);
             if (handledByWorkspace)
             {
@@ -240,10 +242,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     return workspaceResult;
                 }
 
-                return await PersistToFileSystemAsync(path, content, cancellationToken).ConfigureAwait(false);
+                return await PersistToFileSystemAsync(path, content, encodingInfo, cancellationToken).ConfigureAwait(false);
             }
 
-            return await PersistToFileSystemAsync(path, content, cancellationToken).ConfigureAwait(false);
+            return await PersistToFileSystemAsync(path, content, encodingInfo, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task<(bool handled, ChangeDispatchResult result)> TryPersistWithWorkspaceAsync(string path, string content, CancellationToken cancellationToken)
@@ -329,7 +331,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
-        private async Task<ChangeDispatchResult> PersistToFileSystemAsync(string path, string content, CancellationToken cancellationToken)
+        private async Task<ChangeDispatchResult> PersistToFileSystemAsync(string path, string content, DocumentEncodingInfo encodingInfo, CancellationToken cancellationToken)
         {
             try
             {
@@ -339,7 +341,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     return ChangeDispatchResult.MutationFailure(null, "Document is read-only.");
                 }
 
-                await WriteDocumentAsync(path, content, cancellationToken).ConfigureAwait(false);
+                await WriteDocumentAsync(path, content, encodingInfo.Encoding, cancellationToken).ConfigureAwait(false);
                 _workspace.Invalidate(path);
                 return ChangeDispatchResult.Success();
             }
@@ -432,7 +434,29 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return builder.ToString();
         }
 
-        private static async Task WriteDocumentAsync(string path, string content, CancellationToken cancellationToken)
+        private async Task<DocumentEncodingInfo> ResolveEncodingInfoAsync(string path, XamlAstDocument? document, CancellationToken cancellationToken)
+        {
+            if (document is not null)
+            {
+                return new DocumentEncodingInfo(document.Encoding, document.IsEncodingFallback);
+            }
+
+            try
+            {
+                var current = await _workspace.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+                return new DocumentEncodingInfo(current.Encoding, current.IsEncodingFallback);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return new DocumentEncodingInfo(new UTF8Encoding(false), isFallback: true);
+            }
+        }
+
+        private static async Task WriteDocumentAsync(string path, string content, Encoding encoding, CancellationToken cancellationToken)
         {
             using var stream = new FileStream(
                 path,
@@ -442,7 +466,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 bufferSize: 4096,
                 useAsync: true);
 
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            using var writer = new StreamWriter(stream, encoding ?? new UTF8Encoding(false));
 
             cancellationToken.ThrowIfCancellationRequested();
             await writer.WriteAsync(content).ConfigureAwait(false);
@@ -477,6 +501,19 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 _journal.DiscardEntriesForPath(path!);
             }
+        }
+
+        private readonly struct DocumentEncodingInfo
+        {
+            public DocumentEncodingInfo(Encoding encoding, bool isFallback)
+            {
+                Encoding = encoding ?? new UTF8Encoding(false);
+                IsFallback = isFallback;
+            }
+
+            public Encoding Encoding { get; }
+
+            public bool IsFallback { get; }
         }
     }
 }

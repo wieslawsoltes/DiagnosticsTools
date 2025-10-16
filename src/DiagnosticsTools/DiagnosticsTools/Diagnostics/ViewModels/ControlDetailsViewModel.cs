@@ -364,7 +364,9 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             if (args.Result.Status == ChangeDispatchStatus.Success)
             {
-                MutationStatusMessage = null;
+                MutationStatusMessage = string.IsNullOrWhiteSpace(args.Result.Message)
+                    ? null
+                    : args.Result.Message;
             }
             else
             {
@@ -376,7 +378,6 @@ namespace Avalonia.Diagnostics.ViewModels
 
         internal void HandleMutationSuccess(MutationCompletedEventArgs args)
         {
-            MutationStatusMessage = null;
             ClearExternalDocumentChange();
 
             var selectedProperty = SelectedProperty is AvaloniaPropertyViewModel propertyVm ? propertyVm.Property : null;

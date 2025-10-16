@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.Xaml
@@ -8,13 +9,24 @@ namespace Avalonia.Diagnostics.Xaml
     {
         private readonly TextLineMap _lineMap;
 
-        public XamlAstDocument(string path, string text, XmlDocumentSyntax syntax, XamlDocumentVersion version, IReadOnlyList<XamlAstDiagnostic> diagnostics)
+        public XamlAstDocument(
+            string path,
+            string text,
+            XmlDocumentSyntax syntax,
+            XamlDocumentVersion version,
+            IReadOnlyList<XamlAstDiagnostic> diagnostics,
+            Encoding? encoding = null,
+            bool hasByteOrderMark = false,
+            bool isEncodingFallback = false)
         {
             Path = path ?? throw new ArgumentNullException(nameof(path));
             Text = text ?? throw new ArgumentNullException(nameof(text));
             Syntax = syntax ?? throw new ArgumentNullException(nameof(syntax));
             Version = version;
             Diagnostics = diagnostics ?? Array.Empty<XamlAstDiagnostic>();
+            Encoding = encoding ?? new UTF8Encoding(false);
+            HasByteOrderMark = hasByteOrderMark && Encoding.GetPreamble().Length > 0;
+            IsEncodingFallback = encoding is null || isEncodingFallback;
             _lineMap = new TextLineMap(text);
         }
 
@@ -27,6 +39,12 @@ namespace Avalonia.Diagnostics.Xaml
         public XamlDocumentVersion Version { get; }
 
         public IReadOnlyList<XamlAstDiagnostic> Diagnostics { get; }
+
+        public Encoding Encoding { get; }
+
+        public bool HasByteOrderMark { get; }
+
+        public bool IsEncodingFallback { get; }
 
         public LinePositionSpan GetLinePositionSpan(TextSpan span) => _lineMap.GetLinePositionSpan(span);
 

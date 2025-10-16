@@ -22,7 +22,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
         int ChangeCount,
         long? DocumentLength,
         string? CommandId,
-        MutationProvenance Provenance);
+        MutationProvenance Provenance,
+        string? ResultMessage);
 
     internal static class MutationTelemetry
     {
@@ -154,7 +155,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 operations.Count,
                 documentLength,
                 commandId,
-                provenance);
+                provenance,
+                result.Message);
         }
 
         private static long? TryGetDocumentLength(string? version)
