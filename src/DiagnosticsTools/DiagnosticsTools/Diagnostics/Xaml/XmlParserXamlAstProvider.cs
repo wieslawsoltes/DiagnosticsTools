@@ -26,6 +26,7 @@ namespace Avalonia.Diagnostics.Xaml
         private bool _disposed;
 
         public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
+        public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
 
         public async ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
         {
@@ -52,12 +53,25 @@ namespace Avalonia.Diagnostics.Xaml
 
             try
             {
-                return await cached.GetOrCreateAsync(
+                var result = await cached.GetOrCreateAsync(
                     normalizedPath,
                     timestamp,
                     length,
                     (ct) => LoadDocumentAsync(normalizedPath, timestamp, length, ct),
                     linkedToken.Token).ConfigureAwait(false);
+
+                if (result.IsNew)
+                {
+                    var changes = XamlAstNodeDiffer.Diff(result.PreviousIndex, result.Index);
+                    if (changes.Count > 0)
+                    {
+                        OnNodesChanged(new XamlAstNodesChangedEventArgs(normalizedPath, result.Document.Version, changes));
+                    }
+
+                    OnDocumentChanged(new XamlDocumentChangedEventArgs(normalizedPath, XamlDocumentChangeKind.Updated, result.Document));
+                }
+
+                return result.Document;
             }
             finally
             {
@@ -209,6 +223,18 @@ namespace Avalonia.Diagnostics.Xaml
             {
                 if (_cache.TryRemove(normalizedPath, out var removed))
                 {
+                    if (removed.TryGetSnapshot(out var document, out var index) && index is not null)
+                    {
+                        var removalChanges = BuildRemovalChanges(index);
+                        if (removalChanges.Count > 0)
+                        {
+                            OnNodesChanged(new XamlAstNodesChangedEventArgs(
+                                normalizedPath,
+                                document?.Version ?? default,
+                                removalChanges));
+                        }
+                    }
+
                     removed.Dispose();
                 }
 
@@ -231,6 +257,18 @@ namespace Avalonia.Diagnostics.Xaml
                 var oldPath = NormalizePath(e.OldFullPath);
                 if (_cache.TryRemove(oldPath, out var removed))
                 {
+                    if (removed.TryGetSnapshot(out var document, out var index) && index is not null)
+                    {
+                        var removalChanges = BuildRemovalChanges(index);
+                        if (removalChanges.Count > 0)
+                        {
+                            OnNodesChanged(new XamlAstNodesChangedEventArgs(
+                                oldPath,
+                                document?.Version ?? default,
+                                removalChanges));
+                        }
+                    }
+
                     removed.Dispose();
                 }
 
@@ -259,6 +297,39 @@ namespace Avalonia.Diagnostics.Xaml
             {
                 // Diagnostics observers should not crash the provider.
             }
+        }
+
+        private void OnNodesChanged(XamlAstNodesChangedEventArgs args)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            try
+            {
+                NodesChanged?.Invoke(this, args);
+            }
+            catch
+            {
+                // Diagnostics observers should not crash the provider.
+            }
+        }
+
+        private static IReadOnlyList<XamlAstNodeChange> BuildRemovalChanges(IXamlAstIndex index)
+        {
+            if (index is null)
+            {
+                throw new ArgumentNullException(nameof(index));
+            }
+
+            var changes = new List<XamlAstNodeChange>();
+            foreach (var node in index.Nodes)
+            {
+                changes.Add(new XamlAstNodeChange(XamlAstNodeChangeKind.Removed, node, null));
+            }
+
+            return changes.Count == 0 ? Array.Empty<XamlAstNodeChange>() : changes;
         }
 
         private static string ComputeSha256(Stream stream)
@@ -317,8 +388,9 @@ namespace Avalonia.Diagnostics.Xaml
         {
             private readonly SemaphoreSlim _gate = new(1, 1);
             private XamlAstDocument? _document;
+            private IXamlAstIndex? _index;
 
-            public async ValueTask<XamlAstDocument> GetOrCreateAsync(
+            public async ValueTask<CachedDocumentResult> GetOrCreateAsync(
                 string path,
                 DateTimeOffset timestampUtc,
                 long length,
@@ -327,7 +399,12 @@ namespace Avalonia.Diagnostics.Xaml
             {
                 if (_document is { } cached && Matches(cached, timestampUtc, length))
                 {
-                    return cached;
+                    if (_index is null)
+                    {
+                        _index = XamlAstIndex.Build(cached);
+                    }
+
+                    return new CachedDocumentResult(cached, _index!, null, false);
                 }
 
                 await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -335,12 +412,20 @@ namespace Avalonia.Diagnostics.Xaml
                 {
                     if (_document is { } existing && Matches(existing, timestampUtc, length))
                     {
-                        return existing;
+                        if (_index is null)
+                        {
+                            _index = XamlAstIndex.Build(existing);
+                        }
+
+                        return new CachedDocumentResult(existing, _index!, null, false);
                     }
 
+                    var previousIndex = _index;
                     var document = await factory(cancellationToken).ConfigureAwait(false);
+                    var index = XamlAstIndex.Build(document);
                     _document = document;
-                    return document;
+                    _index = index;
+                    return new CachedDocumentResult(document, index, previousIndex, true);
                 }
                 finally
                 {
@@ -348,14 +433,35 @@ namespace Avalonia.Diagnostics.Xaml
                 }
             }
 
+            public bool TryGetSnapshot(out XamlAstDocument? document, out IXamlAstIndex? index)
+            {
+                document = _document;
+                if (document is null)
+                {
+                    index = null;
+                    return false;
+                }
+
+                if (_index is null)
+                {
+                    _index = XamlAstIndex.Build(document);
+                }
+
+                index = _index;
+                return index is not null;
+            }
+
             public void Invalidate()
             {
                 _document = null;
+                _index = null;
             }
 
             public void Dispose()
             {
                 _gate.Dispose();
+                _document = null;
+                _index = null;
             }
 
             private static bool Matches(XamlAstDocument document, DateTimeOffset timestampUtc, long length)
@@ -363,6 +469,29 @@ namespace Avalonia.Diagnostics.Xaml
                 var version = document.Version;
                 return version.TimestampUtc == timestampUtc && version.Length == length;
             }
+        }
+
+        private readonly struct CachedDocumentResult
+        {
+            public CachedDocumentResult(
+                XamlAstDocument document,
+                IXamlAstIndex index,
+                IXamlAstIndex? previousIndex,
+                bool isNew)
+            {
+                Document = document;
+                Index = index;
+                PreviousIndex = previousIndex;
+                IsNew = isNew;
+            }
+
+            public XamlAstDocument Document { get; }
+
+            public IXamlAstIndex Index { get; }
+
+            public IXamlAstIndex? PreviousIndex { get; }
+
+            public bool IsNew { get; }
         }
     }
 }

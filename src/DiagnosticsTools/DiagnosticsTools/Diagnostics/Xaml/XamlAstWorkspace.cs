@@ -10,8 +10,12 @@ namespace Avalonia.Diagnostics.Xaml
     {
         private readonly IXamlAstProvider _provider;
         private readonly Dictionary<string, IndexCacheEntry> _indexCache;
+        private readonly Dictionary<string, DiagnosticsCacheEntry> _diagnosticsCache;
         private readonly object _indexCacheGate = new();
+        private readonly object _diagnosticsGate = new();
         private event EventHandler<XamlDocumentChangedEventArgs>? _documentChanged;
+        private event EventHandler<XamlAstNodesChangedEventArgs>? _nodesChanged;
+        private event EventHandler<XamlDiagnosticsChangedEventArgs>? _diagnosticsChanged;
         private bool _disposed;
         private static readonly StringComparer PathComparer =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -27,7 +31,9 @@ namespace Avalonia.Diagnostics.Xaml
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
             _indexCache = new Dictionary<string, IndexCacheEntry>(PathComparer);
+            _diagnosticsCache = new Dictionary<string, DiagnosticsCacheEntry>(PathComparer);
             _provider.DocumentChanged += HandleProviderDocumentChanged;
+            _provider.NodesChanged += HandleProviderNodesChanged;
         }
 
         internal event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged
@@ -48,10 +54,68 @@ namespace Avalonia.Diagnostics.Xaml
             }
         }
 
+        internal event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged
+        {
+            add
+            {
+                EnsureNotDisposed();
+                _nodesChanged += value;
+            }
+            remove
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _nodesChanged -= value;
+            }
+        }
+
+        internal event EventHandler<XamlDiagnosticsChangedEventArgs>? DiagnosticsChanged
+        {
+            add
+            {
+                EnsureNotDisposed();
+                _diagnosticsChanged += value;
+            }
+            remove
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _diagnosticsChanged -= value;
+            }
+        }
+
         internal ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
             return _provider.GetDocumentAsync(path, cancellationToken);
+        }
+
+        internal bool TryGetDiagnostics(string path, out IReadOnlyList<XamlAstDiagnostic> diagnostics)
+        {
+            EnsureNotDisposed();
+            diagnostics = Array.Empty<XamlAstDiagnostic>();
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            lock (_diagnosticsGate)
+            {
+                if (_diagnosticsCache.TryGetValue(path, out var entry))
+                {
+                    diagnostics = entry.Diagnostics;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         internal async ValueTask<IXamlAstIndex> GetIndexAsync(string path, CancellationToken cancellationToken = default)
@@ -82,6 +146,7 @@ namespace Avalonia.Diagnostics.Xaml
         {
             EnsureNotDisposed();
             RemoveIndexFromCache(path);
+            RemoveDiagnosticsFromCache(path);
             _provider.Invalidate(path);
         }
 
@@ -89,6 +154,7 @@ namespace Avalonia.Diagnostics.Xaml
         {
             EnsureNotDisposed();
             ClearIndexCache();
+            ClearDiagnosticsCache();
             _provider.InvalidateAll();
         }
 
@@ -101,7 +167,9 @@ namespace Avalonia.Diagnostics.Xaml
 
             _disposed = true;
             _provider.DocumentChanged -= HandleProviderDocumentChanged;
+            _provider.NodesChanged -= HandleProviderNodesChanged;
             ClearIndexCache();
+            ClearDiagnosticsCache();
             _provider.Dispose();
         }
 
@@ -123,10 +191,30 @@ namespace Avalonia.Diagnostics.Xaml
             if (string.IsNullOrWhiteSpace(e.Path))
             {
                 ClearIndexCache();
+                ClearDiagnosticsCache();
             }
             else
             {
                 RemoveIndexFromCache(e.Path);
+
+                if (e.Kind == XamlDocumentChangeKind.Invalidated)
+                {
+                    RemoveDiagnosticsFromCache(e.Path);
+                    RaiseDiagnosticsChanged(e.Path, default, Array.Empty<XamlAstDiagnostic>());
+                }
+                else if (e.Kind == XamlDocumentChangeKind.Removed)
+                {
+                    RemoveDiagnosticsFromCache(e.Path);
+                }
+            }
+
+            if (e.Document is { } document)
+            {
+                RaiseDiagnosticsChanged(document.Path, document.Version, document.Diagnostics);
+            }
+            else if (e.Kind == XamlDocumentChangeKind.Removed && !string.IsNullOrWhiteSpace(e.Path))
+            {
+                RaiseDiagnosticsChanged(e.Path, default, Array.Empty<XamlAstDiagnostic>());
             }
 
             try
@@ -139,6 +227,53 @@ namespace Avalonia.Diagnostics.Xaml
             }
         }
 
+        private void HandleProviderNodesChanged(object? sender, XamlAstNodesChangedEventArgs e)
+        {
+            if (e is null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(e.Path))
+            {
+                ClearIndexCache();
+            }
+            else
+            {
+                RemoveIndexFromCache(e.Path);
+            }
+
+            try
+            {
+                _nodesChanged?.Invoke(this, e);
+            }
+            catch
+            {
+                // Observers should not throw.
+            }
+        }
+
+        private void RemoveDiagnosticsFromCache(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            lock (_diagnosticsGate)
+            {
+                _diagnosticsCache.Remove(path!);
+            }
+        }
+
+        private void ClearDiagnosticsCache()
+        {
+            lock (_diagnosticsGate)
+            {
+                _diagnosticsCache.Clear();
+            }
+        }
+
         private void RemoveIndexFromCache(string? path)
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -148,7 +283,7 @@ namespace Avalonia.Diagnostics.Xaml
 
             lock (_indexCacheGate)
             {
-                _indexCache.Remove(path);
+                _indexCache.Remove(path!);
             }
         }
 
@@ -157,6 +292,41 @@ namespace Avalonia.Diagnostics.Xaml
             lock (_indexCacheGate)
             {
                 _indexCache.Clear();
+            }
+        }
+
+        private void RaiseDiagnosticsChanged(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstDiagnostic> diagnostics)
+        {
+            diagnostics ??= Array.Empty<XamlAstDiagnostic>();
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                ClearDiagnosticsCache();
+            }
+            else
+            {
+                lock (_diagnosticsGate)
+                {
+                    if (diagnostics.Count == 0 && version.Equals(default))
+                    {
+                        _diagnosticsCache.Remove(path!);
+                    }
+                    else
+                    {
+                        _diagnosticsCache[path!] = new DiagnosticsCacheEntry(version, diagnostics);
+                    }
+                }
+            }
+
+            var args = new XamlDiagnosticsChangedEventArgs(path, version, diagnostics);
+
+            try
+            {
+                _diagnosticsChanged?.Invoke(this, args);
+            }
+            catch
+            {
+                // Observers should not throw.
             }
         }
 
@@ -171,6 +341,19 @@ namespace Avalonia.Diagnostics.Xaml
             public XamlDocumentVersion Version { get; }
 
             public IXamlAstIndex Index { get; }
+        }
+
+        private readonly struct DiagnosticsCacheEntry
+        {
+            public DiagnosticsCacheEntry(XamlDocumentVersion version, IReadOnlyList<XamlAstDiagnostic> diagnostics)
+            {
+                Version = version;
+                Diagnostics = diagnostics ?? Array.Empty<XamlAstDiagnostic>();
+            }
+
+            public XamlDocumentVersion Version { get; }
+
+            public IReadOnlyList<XamlAstDiagnostic> Diagnostics { get; }
         }
     }
 }
