@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Input;
@@ -11,6 +12,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
+using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -28,6 +30,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly TreeNode[] _rootNodes;
         private readonly Dictionary<XamlAstNodeId, TreeNode> _nodesByXamlId = new();
         private readonly XamlAstWorkspace _xamlAstWorkspace;
+        private readonly RuntimeMutationCoordinator _runtimeCoordinator;
         private TreeNode? _scopedRoot;
         private string? _scopedNodeKey;
         private bool _isScoped;
@@ -38,8 +41,19 @@ namespace Avalonia.Diagnostics.ViewModels
         private ISourceNavigator _sourceNavigator;
         private SourceInfo? _selectedNodeSourceInfo;
         private XamlAstSelection? _selectedNodeXaml;
+        private readonly List<WeakReference<SourcePreviewViewModel>> _previewObservers = new();
+        private readonly object _previewObserversGate = new();
+        private bool _suppressPreviewNavigation;
         private readonly DelegateCommand _previewSourceCommand;
         private readonly DelegateCommand _navigateToSourceCommand;
+        private readonly DelegateCommand _deleteNodeCommand;
+        private const string TreeInspectorName = "TreeView";
+        private const string TreeDeleteGesture = "DeleteNode";
+        private const string DefaultEncoding = "utf-8";
+        private const string DocumentModeWritable = "Writable";
+        private const string TreeContextProperty = "TreeView.Node";
+        private const string TreeContextFrame = "Tree";
+        private const string TreeContextValueSource = "Tree";
         private int _xamlSelectionRevision;
         private PropertyInspectorChangeEmitter? _changeEmitter;
 
@@ -54,7 +68,8 @@ namespace Avalonia.Diagnostics.ViewModels
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
-            XamlAstWorkspace xamlAstWorkspace)
+            XamlAstWorkspace xamlAstWorkspace,
+            RuntimeMutationCoordinator runtimeCoordinator)
         {
             MainView = mainView;
             _rootNodes = nodes;
@@ -63,6 +78,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _xamlAstWorkspace = xamlAstWorkspace ?? throw new ArgumentNullException(nameof(xamlAstWorkspace));
+            _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
             _changeEmitter = null;
             _xamlAstWorkspace.DocumentChanged += OnXamlDocumentChanged;
             PropertiesFilter = new FilterViewModel();
@@ -76,6 +92,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             _previewSourceCommand = new DelegateCommand(PreviewSourceAsync, () => CanPreviewSource);
             _navigateToSourceCommand = new DelegateCommand(NavigateToSourceAsync, () => CanNavigateToSource);
+            _deleteNodeCommand = new DelegateCommand(DeleteNodeAsync, () => CanDeleteNode);
         }
 
     public event EventHandler<string>? ClipboardCopyRequested;
@@ -127,7 +144,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 if (RaiseAndSetIfChanged(ref _selectedNode, value))
                 {
                     Details = value != null ?
-                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator) :
+                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator, _runtimeCoordinator) :
                         null;
                     _details?.AttachChangeEmitter(_changeEmitter);
                     Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
@@ -168,15 +185,53 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool CanPreviewSource => HasSelectedNodeSource;
 
+        public bool CanDeleteNode
+        {
+            get
+            {
+                if (_changeEmitter?.MutationDispatcher is null)
+                {
+                    return false;
+                }
+
+                if (SelectedNode is null)
+                {
+                    return false;
+                }
+
+                if (SelectedNodeXaml is not { Node: { } } selection)
+                {
+                    return false;
+                }
+
+                if (FindParentDescriptor(selection) is null)
+                {
+                    return false;
+                }
+
+                return !string.IsNullOrWhiteSpace(selection.Document?.Path);
+            }
+        }
+
         public XamlAstSelection? SelectedNodeXaml
         {
             get => _selectedNodeXaml;
-            private set => RaiseAndSetIfChanged(ref _selectedNodeXaml, value);
+            private set
+            {
+                if (RaiseAndSetIfChanged(ref _selectedNodeXaml, value))
+                {
+                    NotifyPreviewSelectionChanged(value);
+                    RaisePropertyChanged(nameof(CanDeleteNode));
+                    UpdateCommandStates();
+                }
+            }
         }
 
         public ICommand PreviewSourceCommand => _previewSourceCommand;
 
         public ICommand NavigateToSourceCommand => _navigateToSourceCommand;
+
+        public ICommand DeleteNodeCommand => _deleteNodeCommand;
 
         public ControlDetailsViewModel? Details
         {
@@ -205,6 +260,8 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             _changeEmitter = changeEmitter;
             _details?.AttachChangeEmitter(changeEmitter);
+            RaisePropertyChanged(nameof(CanDeleteNode));
+            UpdateCommandStates();
         }
 
         internal void NotifyMutationCompleted(MutationCompletedEventArgs args)
@@ -245,6 +302,11 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 _details.SourcePreviewRequested -= OnDetailsSourcePreviewRequested;
                 _details.Dispose();
+            }
+
+            lock (_previewObserversGate)
+            {
+                _previewObservers.Clear();
             }
         }
 
@@ -298,8 +360,12 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     var context = node.Visual?.GetType().Name ?? node.Type;
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, mutationOwner: MainView)
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, SynchronizeSelectionFromPreview, mutationOwner: MainView)
                         : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator, mutationOwner: MainView);
+                    if (info is not null)
+                    {
+                        RegisterPreview(preview);
+                    }
                     var runtimePreview = BuildRuntimeSnapshot(node);
                     if (runtimePreview is not null)
                     {
@@ -312,6 +378,48 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 // Preview is best-effort.
             }
+        }
+
+        private async Task DeleteNodeAsync()
+        {
+            if (!CanDeleteNode)
+            {
+                return;
+            }
+
+            var selection = SelectedNodeXaml;
+            var runtimeNode = SelectedNode;
+
+            if (selection is null || selection.Node is null || runtimeNode is null)
+            {
+                return;
+            }
+
+            if (_changeEmitter?.MutationDispatcher is not { } dispatcher)
+            {
+                return;
+            }
+
+            var parentDescriptor = FindParentDescriptor(selection);
+            if (parentDescriptor is null)
+            {
+                return;
+            }
+
+            var envelope = BuildRemoveNodeEnvelope(selection, parentDescriptor, runtimeNode);
+            var result = await dispatcher.DispatchAsync(envelope, CancellationToken.None).ConfigureAwait(false);
+            if (result.Status != ChangeDispatchStatus.Success)
+            {
+                return;
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_runtimeCoordinator.TryApplyElementRemoval(runtimeNode))
+                {
+                    SelectedNode = runtimeNode.Parent;
+                }
+            }, DispatcherPriority.Background);
         }
 
         private SourcePreviewViewModel? BuildRuntimeSnapshot(TreeNode node)
@@ -332,6 +440,158 @@ namespace Avalonia.Diagnostics.ViewModels
             var runtimePreview = new SourcePreviewViewModel(runtimeInfo, _sourceNavigator, mutationOwner: MainView);
             runtimePreview.SetManualSnippet(snippet!);
             return runtimePreview;
+        }
+
+        private void RegisterPreview(SourcePreviewViewModel preview)
+        {
+            if (preview is null)
+            {
+                return;
+            }
+
+            lock (_previewObserversGate)
+            {
+                CleanupPreviewObservers_NoLock();
+                _previewObservers.Add(new WeakReference<SourcePreviewViewModel>(preview));
+            }
+
+            preview.UpdateSelectionFromTree(SelectedNodeXaml);
+        }
+
+        private void NotifyPreviewSelectionChanged(XamlAstSelection? selection)
+        {
+            SourcePreviewViewModel[]? snapshot = null;
+
+            lock (_previewObserversGate)
+            {
+                if (_previewObservers.Count == 0)
+                {
+                    return;
+                }
+
+                CleanupPreviewObservers_NoLock();
+
+                if (_previewObservers.Count == 0)
+                {
+                    return;
+                }
+
+                var list = new List<SourcePreviewViewModel>(_previewObservers.Count);
+                foreach (var reference in _previewObservers)
+                {
+                    if (reference.TryGetTarget(out var target) && target is not null)
+                    {
+                        list.Add(target);
+                    }
+                }
+
+                if (list.Count == 0)
+                {
+                    return;
+                }
+
+                snapshot = list.ToArray();
+            }
+
+            if (snapshot is null)
+            {
+                return;
+            }
+
+            foreach (var preview in snapshot)
+            {
+                preview.UpdateSelectionFromTree(selection);
+            }
+        }
+
+        private void CleanupPreviewObservers_NoLock(SourcePreviewViewModel? instance = null)
+        {
+            for (var index = _previewObservers.Count - 1; index >= 0; index--)
+            {
+                if (!_previewObservers[index].TryGetTarget(out var target) ||
+                    target is null ||
+                    (instance is not null && ReferenceEquals(target, instance)))
+                {
+                    _previewObservers.RemoveAt(index);
+                }
+            }
+        }
+
+        private ChangeEnvelope BuildRemoveNodeEnvelope(XamlAstSelection selection, XamlAstNodeDescriptor parentDescriptor, TreeNode runtimeNode)
+        {
+            if (selection.Document is null)
+            {
+                throw new InvalidOperationException("XAML document is unavailable.");
+            }
+
+            if (selection.Node is null)
+            {
+                throw new InvalidOperationException("XAML descriptor is unavailable.");
+            }
+
+            var document = selection.Document;
+            var descriptor = selection.Node;
+            var elementId = BuildRuntimeElementId(runtimeNode.Visual);
+            var spanHash = XamlGuardUtilities.ComputeNodeHash(document, descriptor);
+            var parentHash = XamlGuardUtilities.ComputeNodeHash(document, parentDescriptor);
+
+            var operation = new ChangeOperation
+            {
+                Id = "op-1",
+                Type = ChangeOperationTypes.RemoveNode,
+                Target = new ChangeTarget
+                {
+                    DescriptorId = descriptor.Id.ToString(),
+                    NodeType = "Element"
+                },
+                Guard = new ChangeOperationGuard
+                {
+                    SpanHash = spanHash,
+                    ParentSpanHash = parentHash
+                }
+            };
+
+            return new ChangeEnvelope
+            {
+                BatchId = Guid.NewGuid(),
+                InitiatedAt = DateTimeOffset.UtcNow,
+                Source = new ChangeSourceInfo
+                {
+                    Inspector = TreeInspectorName,
+                    Gesture = TreeDeleteGesture
+                },
+                Document = new ChangeDocumentInfo
+                {
+                    Path = document.Path,
+                    Encoding = DefaultEncoding,
+                    Version = document.Version.ToString(),
+                    Mode = DocumentModeWritable
+                },
+                Context = new ChangeContextInfo
+                {
+                    ElementId = elementId,
+                    AstNodeId = descriptor.Id.ToString(),
+                    Property = TreeContextProperty,
+                    Frame = TreeContextFrame,
+                    ValueSource = TreeContextValueSource
+                },
+                Guards = new ChangeGuardsInfo
+                {
+                    DocumentVersion = document.Version.ToString(),
+                    RuntimeFingerprint = elementId
+                },
+                Changes = new[] { operation }
+            };
+        }
+
+        private static string BuildRuntimeElementId(AvaloniaObject? element)
+        {
+            if (element is null)
+            {
+                return string.Empty;
+            }
+
+            return $"runtime://avalonia-object/{RuntimeHelpers.GetHashCode(element)}";
         }
 
         private static string? CreateRuntimeSnapshotSnippet(TreeNode node, ControlDetailsViewModel details)
@@ -819,6 +1079,186 @@ namespace Avalonia.Diagnostics.ViewModels
             SourcePreviewRequested?.Invoke(this, e);
         }
 
+        private void SynchronizeSelectionFromPreview(XamlAstSelection? selection)
+        {
+            if (selection?.Node is null)
+            {
+                return;
+            }
+
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => SynchronizeSelectionFromPreview(selection), DispatcherPriority.Background);
+                return;
+            }
+
+            if (_suppressPreviewNavigation)
+            {
+                return;
+            }
+
+            _ = SynchronizeSelectionFromPreviewAsync(selection);
+        }
+
+        private async Task SynchronizeSelectionFromPreviewAsync(XamlAstSelection selection)
+        {
+            try
+            {
+                _suppressPreviewNavigation = true;
+
+                TreeNode? target;
+                lock (_nodesByXamlId)
+                {
+                    _nodesByXamlId.TryGetValue(selection.Node!.Id, out target);
+                }
+
+                if (target is null)
+                {
+                    target = await FindNodeBySelectionAsync(selection).ConfigureAwait(false);
+                }
+
+                if (target is null)
+                {
+                    return;
+                }
+
+                if (!Dispatcher.UIThread.CheckAccess())
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() => ApplySelectionFromPreview(target, selection), DispatcherPriority.Background);
+                }
+                else
+                {
+                    ApplySelectionFromPreview(target, selection);
+                }
+            }
+            finally
+            {
+                _suppressPreviewNavigation = false;
+            }
+        }
+
+        private void ApplySelectionFromPreview(TreeNode target, XamlAstSelection selection)
+        {
+            RegisterXamlDescriptor(target, selection.Node);
+
+            if (!IsNodeInScope(target))
+            {
+                ShowFullTree();
+            }
+
+            if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+            {
+                TreeFilter.FilterString = string.Empty;
+            }
+
+            ExpandNode(target.Parent);
+
+            if (!ReferenceEquals(target, SelectedNode))
+            {
+                SelectedNode = target;
+            }
+            else
+            {
+                _ = UpdateSelectedNodeSourceInfoAsync(target);
+            }
+
+            SelectedNodeXaml = selection;
+
+            Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
+        }
+
+        private async Task<TreeNode?> FindNodeBySelectionAsync(XamlAstSelection selection)
+        {
+            var descriptor = selection.Node;
+            if (descriptor is null)
+            {
+                return null;
+            }
+
+            var documentPath = selection.Document?.Path;
+            TreeNode? bestMatch = null;
+            var bestSpan = int.MaxValue;
+
+            foreach (var node in EnumerateNodes())
+            {
+                if (node.XamlDescriptor?.Id == descriptor.Id)
+                {
+                    return node;
+                }
+
+                var info = node.SourceInfo;
+                if (info is null)
+                {
+                    info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                }
+
+                if (info is null)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(documentPath))
+                {
+                    var targetPath = documentPath!;
+
+                    if (string.IsNullOrWhiteSpace(info.LocalPath))
+                    {
+                        continue;
+                    }
+
+                    if (!PathsEqual(info.LocalPath!, targetPath))
+                    {
+                        continue;
+                    }
+                }
+
+                if (info.StartLine is not int infoStart)
+                {
+                    continue;
+                }
+
+                var infoEnd = info.EndLine ?? infoStart;
+                var descriptorStart = Math.Max(descriptor.LineSpan.Start.Line, 1);
+                var descriptorEnd = Math.Max(descriptor.LineSpan.End.Line, descriptorStart);
+
+                if (descriptorStart < infoStart || descriptorStart > infoEnd)
+                {
+                    continue;
+                }
+
+                var spanLength = descriptorEnd - descriptorStart;
+                if (spanLength < bestSpan)
+                {
+                    bestSpan = spanLength;
+                    bestMatch = node;
+                }
+            }
+
+            return bestMatch;
+        }
+
+        private IEnumerable<TreeNode> EnumerateNodes()
+        {
+            var stack = new Stack<TreeNode>();
+
+            for (var i = Nodes.Length - 1; i >= 0; i--)
+            {
+                stack.Push(Nodes[i]);
+            }
+
+            while (stack.Count > 0)
+            {
+                var node = stack.Pop();
+                yield return node;
+
+                var children = node.Children;
+                for (var i = children.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(children[i]);
+                }
+            }
+        }
+
         private void RegisterXamlDescriptor(TreeNode node, XamlAstNodeDescriptor? descriptor)
         {
             lock (_nodesByXamlId)
@@ -857,7 +1297,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 var document = await _xamlAstWorkspace.GetDocumentAsync(path!).ConfigureAwait(false);
                 var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
                 var descriptor = ResolveDescriptor(index, node, info);
-                return new XamlAstSelection(document, descriptor);
+                var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
+                return new XamlAstSelection(document, descriptor, descriptors);
             }
             catch
             {
@@ -930,6 +1371,59 @@ namespace Avalonia.Diagnostics.ViewModels
             return descriptor;
         }
 
+        private static XamlAstNodeDescriptor? FindParentDescriptor(XamlAstSelection selection)
+        {
+            if (selection.Node is null)
+            {
+                return null;
+            }
+
+            var nodes = selection.DocumentNodes;
+            if (nodes is null)
+            {
+                return null;
+            }
+
+            var node = selection.Node;
+            var path = node.Path;
+            if (path.Count <= 1)
+            {
+                return null;
+            }
+
+            var parentDepth = path.Count - 1;
+
+            foreach (var candidate in nodes)
+            {
+                if (candidate.Path.Count != parentDepth)
+                {
+                    continue;
+                }
+
+                var matches = true;
+                for (var index = 0; index < parentDepth; index++)
+                {
+                    if (candidate.Path[index] != path[index])
+                    {
+                        matches = false;
+                        break;
+                    }
+                }
+
+                if (!matches)
+                {
+                    continue;
+                }
+
+                if (candidate.Span.Start <= node.Span.Start && candidate.Span.End >= node.Span.End)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
         private void OnXamlDocumentChanged(object? sender, XamlDocumentChangedEventArgs e)
         {
             if (SelectedNode is null)
@@ -966,12 +1460,22 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private void NavigateToAstNode(XamlAstNodeDescriptor? descriptor)
         {
+            NavigateToAstNodeCore(descriptor, asynchronous: true);
+        }
+
+        private void NavigateToAstNode(XamlAstNodeDescriptor? descriptor, bool immediate)
+        {
+            NavigateToAstNodeCore(descriptor, asynchronous: !immediate);
+        }
+
+        private void NavigateToAstNodeCore(XamlAstNodeDescriptor? descriptor, bool asynchronous)
+        {
             if (descriptor is null)
             {
                 return;
             }
 
-            Dispatcher.UIThread.Post(() =>
+            void Navigate()
             {
                 TreeNode? target;
                 lock (_nodesByXamlId)
@@ -1002,7 +1506,16 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
-            }, DispatcherPriority.Background);
+            }
+
+            if (asynchronous || !Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(Navigate, DispatcherPriority.Background);
+            }
+            else
+            {
+                Navigate();
+            }
         }
 
         private bool IsNodeInScope(TreeNode node)
@@ -1030,6 +1543,7 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             _previewSourceCommand.RaiseCanExecuteChanged();
             _navigateToSourceCommand.RaiseCanExecuteChanged();
+            _deleteNodeCommand.RaiseCanExecuteChanged();
         }
 
         internal void RestoreScope(TreeNode? scoped)
@@ -1357,5 +1871,8 @@ namespace Avalonia.Diagnostics.ViewModels
         }
     }
 
-    public sealed record XamlAstSelection(XamlAstDocument Document, XamlAstNodeDescriptor? Node);
+    public sealed record XamlAstSelection(
+        XamlAstDocument Document,
+        XamlAstNodeDescriptor? Node,
+        IReadOnlyList<XamlAstNodeDescriptor>? DocumentNodes = null);
 }

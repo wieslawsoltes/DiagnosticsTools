@@ -12,6 +12,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Metadata;
 using Avalonia.Data;
 using Avalonia.Diagnostics.PropertyEditing;
+using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Styling;
@@ -50,6 +51,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private XamlMutationDispatcher? _mutationDispatcher;
         private readonly DelegateCommand _undoMutationCommand;
         private readonly DelegateCommand _redoMutationCommand;
+        private readonly RuntimeMutationCoordinator _runtimeCoordinator;
         private string? _mutationStatusMessage;
 
         public ControlDetailsViewModel(
@@ -57,7 +59,8 @@ namespace Avalonia.Diagnostics.ViewModels
             AvaloniaObject avaloniaObject,
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
-            ISourceNavigator sourceNavigator)
+            ISourceNavigator sourceNavigator,
+            RuntimeMutationCoordinator runtimeCoordinator)
         {
             _avaloniaObject = avaloniaObject;
             _pinnedProperties = pinnedProperties;
@@ -69,6 +72,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _changeEmitter = null;
             _mutationDispatcher = null;
+            _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
             _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
 
@@ -371,7 +375,13 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            await dispatcher.UndoAsync().ConfigureAwait(false);
+            var result = await dispatcher.UndoAsync().ConfigureAwait(false);
+            if (result.Status == ChangeDispatchStatus.Success)
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => _runtimeCoordinator.ApplyUndo(),
+                    DispatcherPriority.Background);
+            }
         }
 
         private async Task RedoMutationAsync()
@@ -382,7 +392,13 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            await dispatcher.RedoAsync().ConfigureAwait(false);
+            var result = await dispatcher.RedoAsync().ConfigureAwait(false);
+            if (result.Status == ChangeDispatchStatus.Success)
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => _runtimeCoordinator.ApplyRedo(),
+                    DispatcherPriority.Background);
+            }
         }
 
         private void UpdateMutationCommandStates()
@@ -458,21 +474,41 @@ namespace Avalonia.Diagnostics.ViewModels
                 .Select(x => new ClrPropertyViewModel(o, x));
         }
 
-        private ValueTask OnAvaloniaPropertyEditedAsync(AvaloniaPropertyViewModel viewModel, object? newValue)
+        private async ValueTask OnAvaloniaPropertyEditedAsync(AvaloniaPropertyViewModel viewModel, object? newValue)
         {
             if (_changeEmitter is null)
             {
-                return new ValueTask();
+                return;
             }
 
             var context = CreatePropertyChangeContext(viewModel.Property);
             if (context is null)
             {
-                return new ValueTask();
+                return;
             }
 
             var gesture = DetermineGesture(viewModel.Property, newValue);
-            return _changeEmitter.EmitLocalValueChangeAsync(context, newValue, gesture);
+            var previous = viewModel.PreviousValue;
+
+            var result = await _changeEmitter.EmitLocalValueChangeAsync(context, newValue, previous, gesture).ConfigureAwait(false);
+
+            if (result.Status == ChangeDispatchStatus.Success)
+            {
+                if (_runtimeCoordinator is not null && !Equals(previous, newValue))
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                        _runtimeCoordinator.RegisterPropertyChange(context.Target, context.Property, previous, newValue),
+                        DispatcherPriority.Background);
+                }
+
+                return;
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                ApplyPropertyValue(context.Target, context.Property, previous);
+                viewModel.Update();
+            }, DispatcherPriority.Background);
         }
 
         private PropertyChangeContext? CreatePropertyChangeContext(AvaloniaProperty property)
@@ -502,6 +538,18 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return "SetLocalValue";
+        }
+
+        private static void ApplyPropertyValue(AvaloniaObject target, AvaloniaProperty property, object? value)
+        {
+            if (ReferenceEquals(value, AvaloniaProperty.UnsetValue))
+            {
+                target.ClearValue(property);
+            }
+            else
+            {
+                target.SetValue(property, value);
+            }
         }
 
         private void OnValueFramePreviewRequested(object? sender, SourcePreviewViewModel e)

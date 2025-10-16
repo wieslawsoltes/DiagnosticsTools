@@ -5,6 +5,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
@@ -27,6 +28,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private int? _highlightSpanStart;
         private int? _highlightSpanLength;
         private readonly Action<XamlAstNodeDescriptor?>? _navigateToAst;
+        private readonly Action<XamlAstSelection?>? _synchronizeSelection;
         private readonly DelegateCommand _openSourceCommand;
         private readonly DelegateCommand _revealInTreeCommand;
         private readonly SourcePreviewNavigationTarget _revealNavigationTarget;
@@ -44,12 +46,14 @@ namespace Avalonia.Diagnostics.ViewModels
         private static double s_lastVerticalRatio = 0.5;
         private static SourcePreviewSplitOrientation s_lastOrientation = SourcePreviewSplitOrientation.Horizontal;
         private MainViewModel? _mutationOwner;
+        private bool _isApplyingTreeSelection;
 
         public SourcePreviewViewModel(
             SourceInfo sourceInfo,
             ISourceNavigator sourceNavigator,
             XamlAstSelection? astSelection = null,
             Action<XamlAstNodeDescriptor?>? navigateToAst = null,
+            Action<XamlAstSelection?>? synchronizeSelection = null,
             HttpClient? httpClient = null,
             string? initialErrorMessage = null,
             MainViewModel? mutationOwner = null)
@@ -59,6 +63,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _httpClient = httpClient ?? SharedHttpClient;
             AstSelection = astSelection;
             _navigateToAst = navigateToAst;
+            _synchronizeSelection = synchronizeSelection;
             if (mutationOwner is not null)
             {
                 AttachToMutationOwner(mutationOwner);
@@ -83,7 +88,6 @@ namespace Avalonia.Diagnostics.ViewModels
                 IsLoading = false;
             }
 
-            RaisePropertyChanged(nameof(CanNavigateToAst));
             _openSourceCommand = new DelegateCommand(OpenSourceAsync, () => SourceInfo.HasLocation);
             _revealInTreeCommand = new DelegateCommand(
                 () =>
@@ -93,7 +97,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 },
                 () => CanNavigateToAst);
             _revealNavigationTarget = new SourcePreviewNavigationTarget("Reveal in Tree", _revealInTreeCommand);
-            UpdateCommandStates();
+            RefreshNavigationState();
         }
 
         public SourceInfo SourceInfo { get; }
@@ -395,6 +399,98 @@ namespace Avalonia.Diagnostics.ViewModels
             _mutationOwner = null;
         }
 
+        internal void UpdateSelectionFromTree(XamlAstSelection? selection)
+        {
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(() => UpdateSelectionFromTree(selection), DispatcherPriority.Background);
+                return;
+            }
+
+            if (ReferenceEquals(AstSelection, selection) || (AstSelection is not null && selection is not null && AstSelection.Equals(selection)))
+            {
+                return;
+            }
+
+            if (selection is null)
+            {
+                if (AstSelection is null)
+                {
+                    return;
+                }
+
+                _isApplyingTreeSelection = true;
+                try
+                {
+                    AstSelection = null;
+                    ApplyHighlightForCurrentSelection();
+                    RefreshNavigationState();
+                }
+                finally
+                {
+                    _isApplyingTreeSelection = false;
+                }
+
+                return;
+            }
+
+            var currentDocument = AstSelection?.Document;
+            var newDocument = selection.Document;
+            var documentMatches = currentDocument is not null &&
+                                  newDocument is not null &&
+                                  DocumentPathsEqual(currentDocument.Path, newDocument.Path);
+
+            _isApplyingTreeSelection = true;
+            try
+            {
+                AstSelection = selection;
+                ApplyHighlightForCurrentSelection();
+
+                if (!HasSnippet || !documentMatches)
+                {
+                    _hasManualSnippet = false;
+                    Snippet = null;
+                    ErrorMessage = null;
+                    _ = LoadAsync();
+                }
+
+                RefreshNavigationState();
+            }
+            finally
+            {
+                _isApplyingTreeSelection = false;
+            }
+        }
+
+        internal void NotifyEditorSelectionChanged(XamlAstNodeDescriptor? descriptor)
+        {
+            if (_isApplyingTreeSelection)
+            {
+                return;
+            }
+
+            var currentSelection = AstSelection;
+            if (currentSelection is null || currentSelection.Document is null)
+            {
+                return;
+            }
+
+            if (currentSelection.Node?.Id == descriptor?.Id)
+            {
+                return;
+            }
+
+            AstSelection = new XamlAstSelection(
+                currentSelection.Document,
+                descriptor,
+                currentSelection.DocumentNodes);
+
+            ApplyHighlightForCurrentSelection();
+            RefreshNavigationState();
+
+            _synchronizeSelection?.Invoke(AstSelection);
+        }
+
         private async Task ReloadAfterMutationAsync()
         {
             _hasManualSnippet = false;
@@ -447,46 +543,8 @@ namespace Avalonia.Diagnostics.ViewModels
             SnippetStartLine = 1;
             Snippet = content;
 
-            if (AstSelection?.Node is { } descriptor)
-            {
-                var span = descriptor.Span;
-                if (span.Length > 0)
-                {
-                    HighlightSpanStart = span.Start;
-                    HighlightSpanLength = span.Length;
-                }
-                else
-                {
-                    HighlightSpanStart = null;
-                    HighlightSpanLength = null;
-                }
-
-                var startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
-                var endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
-                HighlightedStartLine = startLine;
-                HighlightedEndLine = endLine;
-            }
-            else if (SourceInfo.HasLocation && SourceInfo.StartLine is int start)
-            {
-                var end = SourceInfo.EndLine ?? start;
-                start = Math.Max(start, 1);
-                end = Math.Max(end, start);
-                HighlightedStartLine = start;
-                HighlightedEndLine = end;
-                HighlightSpanStart = null;
-                HighlightSpanLength = null;
-            }
-            else
-            {
-                HighlightedStartLine = null;
-                HighlightedEndLine = null;
-                HighlightSpanStart = null;
-                HighlightSpanLength = null;
-            }
-
-            RaisePropertyChanged(nameof(CanNavigateToAst));
-            UpdateNavigationTargets();
-            UpdateCommandStates();
+            ApplyHighlightForCurrentSelection();
+            RefreshNavigationState();
         }
 
         public void SetManualSnippet(string snippet, int snippetStartLine = 1)
@@ -495,13 +553,99 @@ namespace Avalonia.Diagnostics.ViewModels
             ErrorMessage = null;
             SnippetStartLine = snippetStartLine;
             Snippet = snippet;
+            ClearHighlight();
+            IsLoading = false;
+            RefreshNavigationState();
+        }
+
+        private void ApplyHighlightForCurrentSelection()
+        {
+            if (AstSelection?.Node is { } descriptor)
+            {
+                ApplyDescriptorHighlight(descriptor);
+                return;
+            }
+
+            ApplySourceInfoHighlight();
+        }
+
+        private void ApplyDescriptorHighlight(XamlAstNodeDescriptor descriptor)
+        {
+            var span = descriptor.Span;
+            if (span.Length > 0)
+            {
+                HighlightSpanStart = span.Start;
+                HighlightSpanLength = span.Length;
+            }
+            else
+            {
+                HighlightSpanStart = null;
+                HighlightSpanLength = null;
+            }
+
+            var startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+            var endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+            HighlightedStartLine = startLine;
+            HighlightedEndLine = endLine;
+        }
+
+        private void ApplySourceInfoHighlight()
+        {
+            if (SourceInfo.HasLocation && SourceInfo.StartLine is int startLine)
+            {
+                var endLine = SourceInfo.EndLine ?? startLine;
+                startLine = Math.Max(startLine, 1);
+                endLine = Math.Max(endLine, startLine);
+                HighlightedStartLine = startLine;
+                HighlightedEndLine = endLine;
+            }
+            else
+            {
+                HighlightedStartLine = null;
+                HighlightedEndLine = null;
+            }
+
+            HighlightSpanStart = null;
+            HighlightSpanLength = null;
+        }
+
+        private void ClearHighlight()
+        {
             HighlightedStartLine = null;
             HighlightedEndLine = null;
             HighlightSpanStart = null;
             HighlightSpanLength = null;
-            IsLoading = false;
+        }
+
+        private void RefreshNavigationState()
+        {
+            RaisePropertyChanged(nameof(CanNavigateToAst));
             UpdateNavigationTargets();
             UpdateCommandStates();
+        }
+
+        private static bool DocumentPathsEqual(string? left, string? right)
+        {
+            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return string.Equals(left, right, comparison);
+            }
+
+            try
+            {
+                left = Path.GetFullPath(left);
+                right = Path.GetFullPath(right);
+            }
+            catch
+            {
+                // Ignore normalization errors and fall back to raw comparison.
+            }
+
+            return string.Equals(left, right, comparison);
         }
 
         public void AddNavigationTarget(SourcePreviewNavigationTarget target)

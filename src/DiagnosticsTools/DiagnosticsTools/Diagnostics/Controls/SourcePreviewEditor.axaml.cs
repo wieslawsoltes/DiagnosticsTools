@@ -47,6 +47,8 @@ namespace Avalonia.Diagnostics.Controls
         private Cursor? _previousCursor;
         private bool _isApplyingScroll;
         private SourcePreviewScrollState _lastScrollState = SourcePreviewScrollState.Empty;
+        private bool _suppressSelectionSync;
+        private XamlAstNodeDescriptor? _currentDescriptor;
 
         public SourcePreviewEditor()
         {
@@ -107,6 +109,8 @@ namespace Avalonia.Diagnostics.Controls
                 _textEditor.PointerPressed -= OnEditorPointerPressed;
                 _textEditor.TextArea.KeyDown -= OnEditorKeyDown;
                 _textEditor.TextArea.KeyUp -= OnEditorKeyUp;
+                _textEditor.TextArea.Caret.PositionChanged -= OnCaretPositionChanged;
+                _textEditor.TextArea.SelectionChanged -= OnSelectionChanged;
             }
 
             if (_foldingManager is not null && _textEditor is not null)
@@ -149,6 +153,8 @@ namespace Avalonia.Diagnostics.Controls
             _textEditor.PointerPressed += OnEditorPointerPressed;
             _textEditor.TextArea.KeyDown += OnEditorKeyDown;
             _textEditor.TextArea.KeyUp += OnEditorKeyUp;
+            _textEditor.TextArea.Caret.PositionChanged += OnCaretPositionChanged;
+            _textEditor.TextArea.SelectionChanged += OnSelectionChanged;
 
             var textView = _textEditor.TextArea.TextView;
             textView.ScrollOffsetChanged += OnTextViewScrollChanged;
@@ -241,6 +247,7 @@ namespace Avalonia.Diagnostics.Controls
             }
 
             _currentSnippet = null;
+            _currentDescriptor = null;
             _lastScrollState = SourcePreviewScrollState.Empty;
 
             if (_textEditor.Document is { } document)
@@ -317,24 +324,15 @@ namespace Avalonia.Diagnostics.Controls
                 return;
             }
 
-            var document = _textEditor.Document;
-            var invalidate = false;
-
-            if (document is null || document.LineCount == 0 || highlightedStartLine is null || highlightedEndLine is null)
+            _suppressSelectionSync = true;
+            try
             {
-                if (_lineColorizer.StartLine is not null || _lineColorizer.EndLine is not null)
-                {
-                    _lineColorizer.StartLine = null;
-                    _lineColorizer.EndLine = null;
-                    invalidate = true;
-                }
-            }
-            else
-            {
-                var startLine = highlightedStartLine.Value - snippetStartLine + 1;
-                var endLine = highlightedEndLine.Value - snippetStartLine + 1;
+                _currentDescriptor = _viewModel?.AstSelection?.Node;
 
-                if (startLine < 1 || startLine > document.LineCount)
+                var document = _textEditor.Document;
+                var invalidate = false;
+
+                if (document is null || document.LineCount == 0 || highlightedStartLine is null || highlightedEndLine is null)
                 {
                     if (_lineColorizer.StartLine is not null || _lineColorizer.EndLine is not null)
                     {
@@ -345,71 +343,198 @@ namespace Avalonia.Diagnostics.Controls
                 }
                 else
                 {
-                    endLine = Math.Max(startLine, Math.Min(endLine, document.LineCount));
-                    if (_lineColorizer.StartLine != startLine || _lineColorizer.EndLine != endLine)
+                    var startLine = highlightedStartLine.Value - snippetStartLine + 1;
+                    var endLine = highlightedEndLine.Value - snippetStartLine + 1;
+
+                    if (startLine < 1 || startLine > document.LineCount)
                     {
-                        _lineColorizer.StartLine = startLine;
-                        _lineColorizer.EndLine = endLine;
-                        invalidate = true;
+                        if (_lineColorizer.StartLine is not null || _lineColorizer.EndLine is not null)
+                        {
+                            _lineColorizer.StartLine = null;
+                            _lineColorizer.EndLine = null;
+                            invalidate = true;
+                        }
                     }
+                    else
+                    {
+                        endLine = Math.Max(startLine, Math.Min(endLine, document.LineCount));
+                        if (_lineColorizer.StartLine != startLine || _lineColorizer.EndLine != endLine)
+                        {
+                            _lineColorizer.StartLine = startLine;
+                            _lineColorizer.EndLine = endLine;
+                            invalidate = true;
+                        }
 
-                    _textEditor.ScrollTo(startLine, 0);
-                    _textEditor.TextArea.Caret.Position = new TextViewPosition(startLine, 0);
+                        _textEditor.ScrollTo(startLine, 0);
+                        _textEditor.TextArea.Caret.Position = new TextViewPosition(startLine, 0);
+                    }
                 }
-            }
 
-            var hasSpan = false;
-            var startOffset = 0;
-            var spanLength = 0;
+                var hasSpan = false;
+                var startOffset = 0;
+                var spanLength = 0;
 
-            if (document is not null && highlightSpanStart is not null && highlightSpanLength is not null && highlightSpanLength.Value > 0)
-            {
-                startOffset = Math.Max(0, highlightSpanStart.Value);
-                var maxLength = Math.Max(0, document.TextLength - startOffset);
-                spanLength = Math.Min(highlightSpanLength.Value, maxLength);
-                hasSpan = spanLength > 0;
-            }
-
-            if (!hasSpan)
-            {
-                if (_segmentColorizer.SegmentStart is not null || _segmentColorizer.SegmentLength is not null)
+                if (document is not null && highlightSpanStart is not null && highlightSpanLength is not null && highlightSpanLength.Value > 0)
                 {
-                    _segmentColorizer.SegmentStart = null;
-                    _segmentColorizer.SegmentLength = null;
-                    invalidate = true;
+                    startOffset = Math.Max(0, highlightSpanStart.Value);
+                    var maxLength = Math.Max(0, document.TextLength - startOffset);
+                    spanLength = Math.Min(highlightSpanLength.Value, maxLength);
+                    hasSpan = spanLength > 0;
                 }
-            }
-            else if (_segmentColorizer.SegmentStart != startOffset || _segmentColorizer.SegmentLength != spanLength)
-            {
-                _segmentColorizer.SegmentStart = startOffset;
-                _segmentColorizer.SegmentLength = spanLength;
-                invalidate = true;
-            }
 
-            if (_selectionAdorner is not null)
-            {
                 if (!hasSpan)
                 {
-                    if (_selectionAdorner.SegmentStart is not null || _selectionAdorner.SegmentLength is not null)
+                    if (_segmentColorizer.SegmentStart is not null || _segmentColorizer.SegmentLength is not null)
                     {
-                        _selectionAdorner.SegmentStart = null;
-                        _selectionAdorner.SegmentLength = null;
+                        _segmentColorizer.SegmentStart = null;
+                        _segmentColorizer.SegmentLength = null;
                         invalidate = true;
                     }
                 }
-                else if (_selectionAdorner.SegmentStart != startOffset || _selectionAdorner.SegmentLength != spanLength)
+                else if (_segmentColorizer.SegmentStart != startOffset || _segmentColorizer.SegmentLength != spanLength)
                 {
-                    _selectionAdorner.SegmentStart = startOffset;
-                    _selectionAdorner.SegmentLength = spanLength;
+                    _segmentColorizer.SegmentStart = startOffset;
+                    _segmentColorizer.SegmentLength = spanLength;
                     invalidate = true;
+                }
+
+                if (_selectionAdorner is not null)
+                {
+                    if (!hasSpan)
+                    {
+                        if (_selectionAdorner.SegmentStart is not null || _selectionAdorner.SegmentLength is not null)
+                        {
+                            _selectionAdorner.SegmentStart = null;
+                            _selectionAdorner.SegmentLength = null;
+                            invalidate = true;
+                        }
+                    }
+                    else if (_selectionAdorner.SegmentStart != startOffset || _selectionAdorner.SegmentLength != spanLength)
+                    {
+                        _selectionAdorner.SegmentStart = startOffset;
+                        _selectionAdorner.SegmentLength = spanLength;
+                        invalidate = true;
+                    }
+                }
+
+                if (invalidate)
+                {
+                    _textEditor.TextArea.TextView.InvalidateVisual();
+                }
+            }
+            finally
+            {
+                _suppressSelectionSync = false;
+            }
+        }
+
+        private void OnCaretPositionChanged(object? sender, EventArgs e)
+        {
+            SynchronizeSelectionFromEditor();
+        }
+
+        private void OnSelectionChanged(object? sender, EventArgs e)
+        {
+            SynchronizeSelectionFromEditor();
+        }
+
+        private void SynchronizeSelectionFromEditor()
+        {
+            if (_suppressSelectionSync)
+            {
+                return;
+            }
+
+            var viewModel = _viewModel;
+            var textEditor = _textEditor;
+
+            if (viewModel is null || textEditor is null)
+            {
+                return;
+            }
+
+            var selection = viewModel.AstSelection;
+            if (selection is null || selection.Document is null)
+            {
+                return;
+            }
+
+            var nodes = selection.DocumentNodes;
+            if (nodes is null || nodes.Count == 0)
+            {
+                return;
+            }
+
+            var document = textEditor.Document;
+            if (document is null || document.TextLength == 0)
+            {
+                return;
+            }
+
+            var textArea = textEditor.TextArea;
+            var offset = textArea.Caret.Offset;
+
+            if (!textArea.Selection.IsEmpty && textArea.Selection.SurroundingSegment is { } segment)
+            {
+                offset = Math.Min(Math.Max(segment.Offset, 0), document.TextLength);
+            }
+
+            if (offset >= document.TextLength && document.TextLength > 0)
+            {
+                offset = document.TextLength - 1;
+            }
+
+            if (offset < 0)
+            {
+                offset = 0;
+            }
+
+            var descriptor = FindDescriptorAtOffset(selection, offset);
+
+            if (descriptor is null && offset > 0)
+            {
+                descriptor = FindDescriptorAtOffset(selection, offset - 1);
+            }
+
+            if (_currentDescriptor?.Id == descriptor?.Id)
+            {
+                return;
+            }
+
+            _currentDescriptor = descriptor;
+            viewModel.NotifyEditorSelectionChanged(descriptor);
+        }
+
+        private static XamlAstNodeDescriptor? FindDescriptorAtOffset(XamlAstSelection selection, int offset)
+        {
+            var nodes = selection.DocumentNodes;
+            if (nodes is null || nodes.Count == 0)
+            {
+                return null;
+            }
+
+            XamlAstNodeDescriptor? best = null;
+
+            foreach (var node in nodes)
+            {
+                var span = node.Span;
+                if (offset < span.Start || offset >= span.End)
+                {
+                    continue;
+                }
+
+                if (span.Length <= 0)
+                {
+                    continue;
+                }
+
+                if (best is null || span.Length < best.Span.Length)
+                {
+                    best = node;
                 }
             }
 
-            if (invalidate)
-            {
-                _textEditor.TextArea.TextView.InvalidateVisual();
-            }
-
+            return best;
         }
 
         private void OnThemeVariantChanged(object? sender, EventArgs e)

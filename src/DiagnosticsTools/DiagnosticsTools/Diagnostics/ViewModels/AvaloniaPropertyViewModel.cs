@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Data;
 
 namespace Avalonia.Diagnostics.ViewModels
@@ -59,7 +60,18 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 try
                 {
-                    _target.SetValue(Property, value);
+                    var previous = _target.GetValue(Property);
+                    PreviousValue = previous;
+
+                    if (ReferenceEquals(value, AvaloniaProperty.UnsetValue))
+                    {
+                        _target.ClearValue(Property);
+                    }
+                    else
+                    {
+                        _target.SetValue(Property, value);
+                    }
+
                     Update();
                     NotifyChange();
                 }
@@ -72,6 +84,7 @@ namespace Avalonia.Diagnostics.ViewModels
         public override Type? DeclaringType { get; }
         public override Type PropertyType => _propertyType;
         public override bool IsReadonly => Property.IsReadOnly;
+        internal object? PreviousValue { get; private set; }
 
         // [MemberNotNull(nameof(_type), nameof(_group), nameof(_priority))]
         public override void Update()

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Diagnostics.Runtime;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -14,8 +15,9 @@ namespace Avalonia.Diagnostics.ViewModels
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
-            XamlAstWorkspace xamlAstWorkspace)
-            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace)
+            XamlAstWorkspace xamlAstWorkspace,
+            RuntimeMutationCoordinator runtimeCoordinator)
+            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator)
         {
         }
 
@@ -39,15 +41,16 @@ namespace Avalonia.Diagnostics.ViewModels
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
-            XamlAstWorkspace xamlAstWorkspace)
+            XamlAstWorkspace xamlAstWorkspace,
+            RuntimeMutationCoordinator runtimeCoordinator)
         {
             var nodes = CombinedTreeNode.Create(root);
             if (nodes.Length == 0)
             {
-                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace);
+                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator);
             }
 
-            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace);
+            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator);
         }
 
         protected override bool CanNodeMatch(TreeNode node)

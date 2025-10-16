@@ -134,11 +134,80 @@ public class SourcePreviewViewModelTests
         Assert.Null(viewModel.HighlightSpanStart);
     }
 
+    [Fact]
+    public async Task UpdateSelectionFromTree_RefreshesHighlight()
+    {
+        var (document, index) = CreateDocument();
+        var gridDescriptor = index.Nodes.First(node => node.LocalName == "Grid");
+        var buttonDescriptor = index.Nodes.First(node => node.LocalName == "Button");
+        var selection = new XamlAstSelection(document, gridDescriptor, index.Nodes.ToList());
+        var navigator = new StubSourceNavigator();
+        var info = CreateSourceInfo(document.Path);
+        var viewModel = new SourcePreviewViewModel(info, navigator, selection);
+
+        await viewModel.LoadAsync();
+
+        var updatedSelection = new XamlAstSelection(document, buttonDescriptor, index.Nodes.ToList());
+        viewModel.UpdateSelectionFromTree(updatedSelection);
+
+        Assert.Same(buttonDescriptor, viewModel.AstSelection?.Node);
+        Assert.Equal(buttonDescriptor.LineSpan.Start.Line, viewModel.HighlightedStartLine);
+        Assert.Equal(buttonDescriptor.LineSpan.End.Line, viewModel.HighlightedEndLine);
+    }
+
+    [Fact]
+    public void NotifyEditorSelectionChanged_PropagatesToSynchronizer()
+    {
+        var (document, index) = CreateDocument();
+        var gridDescriptor = index.Nodes.First(node => node.LocalName == "Grid");
+        var buttonDescriptor = index.Nodes.First(node => node.LocalName == "Button");
+        var selection = new XamlAstSelection(document, gridDescriptor, index.Nodes.ToList());
+        var navigator = new StubSourceNavigator();
+        var info = CreateSourceInfo(document.Path);
+        XamlAstSelection? forwarded = null;
+        var viewModel = new SourcePreviewViewModel(
+            info,
+            navigator,
+            selection,
+            navigateToAst: null,
+            synchronizeSelection: sel => forwarded = sel);
+
+        viewModel.NotifyEditorSelectionChanged(buttonDescriptor);
+
+        Assert.Same(buttonDescriptor, forwarded?.Node);
+        Assert.Same(buttonDescriptor, viewModel.AstSelection?.Node);
+    }
+
     private static SourceInfo CreateSourceInfo(string path) =>
         new(path, null, 1, 1, 1, 1, SourceOrigin.Local);
 
     private static SourceInfo CreateRuntimeInfo() =>
         new("Runtime Snapshot", null, null, null, null, null, SourceOrigin.Generated);
+
+    private static (XamlAstDocument Document, XamlAstIndex Index) CreateDocument()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid>
+    <Button x:Name="Foo" Content="Bar" />
+  </Grid>
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        if (!ReferenceEquals(normalized, xaml))
+        {
+            xaml = normalized;
+        }
+
+        var syntax = Parser.ParseText(xaml);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(xaml)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UtcNow, xaml.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", xaml, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        return (document, index);
+    }
 
     private static void ResetSplitState()
     {

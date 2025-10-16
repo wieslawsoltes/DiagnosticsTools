@@ -44,7 +44,7 @@ public class PropertyInspectorChangeEmitterTests
         var fixedTime = new DateTimeOffset(2024, 03, 10, 12, 34, 56, TimeSpan.Zero);
         var emitter = new PropertyInspectorChangeEmitter(dispatcher, () => fixedTime, () => Guid.Parse("00000000-0000-0000-0000-000000000123"));
 
-        await emitter.EmitLocalValueChangeAsync(context, true, "ToggleCheckBox");
+        await emitter.EmitLocalValueChangeAsync(context, true, false, "ToggleCheckBox");
 
         var envelope = dispatcher.LastEnvelope;
         Assert.NotNull(envelope);
@@ -71,6 +71,47 @@ public class PropertyInspectorChangeEmitterTests
         Assert.Equal("IsChecked", operation.Payload.Name);
         Assert.NotNull(operation.Guard.SpanHash);
         Assert.StartsWith("h64:", operation.Guard.SpanHash, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Reverts_To_Original_Removes_Attribute()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "CheckBox");
+
+        var target = new DummyAvaloniaObject();
+        var context = new PropertyChangeContext(
+            target,
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var fixedTime = new DateTimeOffset(2024, 03, 10, 12, 34, 56, TimeSpan.Zero);
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher, () => fixedTime, () => Guid.Parse("00000000-0000-0000-0000-000000000456"));
+
+        await emitter.EmitLocalValueChangeAsync(context, true, false, "ToggleCheckBox");
+        await emitter.EmitLocalValueChangeAsync(context, false, true, "ToggleCheckBox");
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        var operation = Assert.Single(envelope!.Changes);
+        Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
+        Assert.Equal("Unset", operation.Payload.ValueKind);
+        Assert.Null(operation.Payload.NewValue);
     }
 
     private sealed class RecordingDispatcher : IChangeDispatcher

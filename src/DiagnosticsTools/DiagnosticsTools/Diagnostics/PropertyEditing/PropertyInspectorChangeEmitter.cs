@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -11,6 +12,7 @@ using Avalonia.Data;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Markup.Xaml;
 using Avalonia.Markup.Xaml.MarkupExtensions;
+using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.PropertyEditing
 {
@@ -29,6 +31,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
         private readonly Func<Guid> _idProvider;
         private readonly JsonSerializerOptions _serializerOptions;
         private readonly bool _dispatcherProvidesNotifications;
+        private readonly Dictionary<MutationOriginKey, PropertyMutationOrigin> _mutationOrigins = new();
 
         internal XamlMutationDispatcher? MutationDispatcher => _dispatcher as XamlMutationDispatcher;
 
@@ -52,9 +55,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
             };
         }
 
-        public ValueTask EmitLocalValueChangeAsync(
+        public ValueTask<ChangeDispatchResult> EmitLocalValueChangeAsync(
             PropertyChangeContext context,
             object? newValue,
+            object? previousValue,
             string gesture,
             CancellationToken cancellationToken = default)
         {
@@ -65,27 +69,41 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             if (context.Descriptor is null)
             {
-                return new ValueTask();
+                return new ValueTask<ChangeDispatchResult>(ChangeDispatchResult.MutationFailure(null, "Missing XAML selection."));
             }
 
-            var envelope = BuildSetAttributeEnvelope(context, newValue, gesture);
+            var origin = GetOrCreateMutationOrigin(context, previousValue);
+            var envelope = BuildSetAttributeEnvelope(context, newValue, origin, gesture);
             return DispatchAsync(envelope, cancellationToken);
         }
 
         internal event EventHandler<MutationCompletedEventArgs>? ChangeCompleted;
 
-        private ChangeEnvelope BuildSetAttributeEnvelope(PropertyChangeContext context, object? newValue, string gesture)
+        private ChangeEnvelope BuildSetAttributeEnvelope(
+            PropertyChangeContext context,
+            object? newValue,
+            PropertyMutationOrigin origin,
+            string gesture)
         {
             var descriptor = context.Descriptor;
             var document = context.Document;
             var property = context.Property;
             var target = context.Target;
 
-            var valueKind = DetermineValueKind(newValue);
-            var valueString = FormatValue(newValue, property.PropertyType);
             var attributeName = BuildAttributeName(property);
-            var bindingPayload = BuildBindingPayload(newValue);
-            var resourcePayload = BuildResourcePayload(newValue);
+
+            var shouldUnset = ShouldUnsetAttribute(origin, newValue);
+            var valueKind = shouldUnset ? "Unset" : DetermineValueKind(newValue);
+            string? valueString = null;
+            BindingPayload? bindingPayload = null;
+            ResourcePayload? resourcePayload = null;
+
+            if (!string.Equals(valueKind, "Unset", StringComparison.Ordinal))
+            {
+                valueString = FormatValue(newValue, property.PropertyType);
+                bindingPayload = BuildBindingPayload(newValue);
+                resourcePayload = BuildResourcePayload(newValue);
+            }
 
             var elementPath = BuildTargetPath(descriptor, attributeName);
             var spanHash = XamlGuardUtilities.ComputeAttributeHash(document, descriptor, attributeName);
@@ -157,6 +175,26 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return envelope;
         }
 
+        private PropertyMutationOrigin GetOrCreateMutationOrigin(PropertyChangeContext context, object? previousValue)
+        {
+            var key = new MutationOriginKey(
+                context.Document.Path ?? string.Empty,
+                context.Descriptor.Id.ToString(),
+                context.Property);
+
+            if (_mutationOrigins.TryGetValue(key, out var origin))
+            {
+                return origin;
+            }
+
+            var attributeName = BuildAttributeName(context.Property);
+            var snapshot = CaptureAttributeSnapshot(context.Document, context.Descriptor, attributeName);
+
+            origin = new PropertyMutationOrigin(snapshot.Exists, snapshot.Value, previousValue);
+            _mutationOrigins[key] = origin;
+            return origin;
+        }
+
         private static string BuildAttributeName(AvaloniaProperty property)
         {
             if (property is null)
@@ -184,6 +222,25 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return $"{name}[{index}].@{attributeName}";
         }
 
+        private static (bool Exists, string? Value) CaptureAttributeSnapshot(
+            XamlAstDocument document,
+            XamlAstNodeDescriptor descriptor,
+            string attributeName)
+        {
+            if (XamlGuardUtilities.TryLocateAttribute(document, descriptor, attributeName, out var attribute, out _)
+                && attribute is not null)
+            {
+                if (attribute.ValueNode is { } valueNode)
+                {
+                    return (true, ExtractAttributeValue(document.Text, valueNode.Span));
+                }
+
+                return (true, null);
+            }
+
+            return (false, null);
+        }
+
         private static string DetermineValueKind(object? value)
         {
             return value switch
@@ -193,6 +250,21 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 MarkupExtension => "MarkupExtension",
                 _ => DefaultValueKind
             };
+        }
+
+        private static bool ShouldUnsetAttribute(PropertyMutationOrigin origin, object? newValue)
+        {
+            if (newValue is null || IsUnsetValue(newValue))
+            {
+                return true;
+            }
+
+            if (!origin.AttributeExisted)
+            {
+                return ValuesEqual(newValue, origin.RuntimeValue);
+            }
+
+            return false;
         }
 
         private static BindingPayload? BuildBindingPayload(object? value)
@@ -244,6 +316,11 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return null;
             }
 
+            if (IsUnsetValue(value))
+            {
+                return null;
+            }
+
             if (value is string s)
             {
                 return s;
@@ -275,7 +352,54 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return value.ToString();
         }
 
-        private async ValueTask DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken)
+        private static string? ExtractAttributeValue(string text, TextSpan span)
+        {
+            if (span.Length <= 0)
+            {
+                return string.Empty;
+            }
+
+            var raw = text.Substring(span.Start, span.Length);
+            return TrimQuotes(raw);
+        }
+
+        private static string TrimQuotes(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length < 2)
+            {
+                return value;
+            }
+
+            var first = value[0];
+            var last = value[value.Length - 1];
+
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
+            {
+                return value.Substring(1, value.Length - 2);
+            }
+
+            return value;
+        }
+
+        private static bool ValuesEqual(object? first, object? second)
+        {
+            if (ReferenceEquals(first, second))
+            {
+                return true;
+            }
+
+            if (first is null || second is null)
+            {
+                return false;
+            }
+
+            return Equals(first, second);
+        }
+
+        private static bool IsUnsetValue(object? value) =>
+            ReferenceEquals(value, AvaloniaProperty.UnsetValue);
+
+        private async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken)
         {
             try
             {
@@ -284,6 +408,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 {
                     OnChangeCompleted(new MutationCompletedEventArgs(envelope, result));
                 }
+
+                return result;
             }
             catch (OperationCanceledException)
             {
@@ -293,6 +419,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
                 OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure));
+                return failure;
             }
         }
 
@@ -320,6 +447,41 @@ namespace Avalonia.Diagnostics.PropertyEditing
             catch
             {
                 // Diagnostics notifications should not throw.
+            }
+        }
+
+        private readonly record struct PropertyMutationOrigin(bool AttributeExisted, string? AttributeValue, object? RuntimeValue);
+
+        private readonly struct MutationOriginKey : IEquatable<MutationOriginKey>
+        {
+            public MutationOriginKey(string documentPath, string descriptorId, AvaloniaProperty property)
+            {
+                DocumentPath = documentPath ?? string.Empty;
+                DescriptorId = descriptorId ?? string.Empty;
+                Property = property ?? throw new ArgumentNullException(nameof(property));
+            }
+
+            private string DocumentPath { get; }
+            private string DescriptorId { get; }
+            private AvaloniaProperty Property { get; }
+
+            public bool Equals(MutationOriginKey other)
+            {
+                return string.Equals(DocumentPath, other.DocumentPath, StringComparison.Ordinal) &&
+                       string.Equals(DescriptorId, other.DescriptorId, StringComparison.Ordinal) &&
+                       ReferenceEquals(Property, other.Property);
+            }
+
+            public override bool Equals(object? obj) =>
+                obj is MutationOriginKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                var hash = new HashCode();
+                hash.Add(DocumentPath, StringComparer.Ordinal);
+                hash.Add(DescriptorId, StringComparer.Ordinal);
+                hash.Add(Property);
+                return hash.ToHashCode();
             }
         }
     }

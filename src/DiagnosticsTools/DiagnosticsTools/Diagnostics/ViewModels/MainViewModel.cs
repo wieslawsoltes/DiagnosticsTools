@@ -16,6 +16,7 @@ using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels.Metrics;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Diagnostics.Runtime;
 using Microsoft.CodeAnalysis;
 
 namespace Avalonia.Diagnostics.ViewModels
@@ -62,6 +63,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly PropertyInspectorChangeEmitter _propertyChangeEmitter;
         private readonly Workspace? _roslynWorkspace;
         private readonly EventHandler<WorkspaceChangeEventArgs>? _workspaceChangedHandler;
+        private readonly RuntimeMutationCoordinator _runtimeCoordinator;
 
         public MainViewModel(AvaloniaObject root, ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator, Workspace? roslynWorkspace = null)
         {
@@ -70,6 +72,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _roslynWorkspace = roslynWorkspace;
             _xamlAstWorkspace = new XamlAstWorkspace();
+            _runtimeCoordinator = new RuntimeMutationCoordinator();
             _mutationDispatcher = new XamlMutationDispatcher(_xamlAstWorkspace, _roslynWorkspace);
             _propertyChangeEmitter = new PropertyInspectorChangeEmitter(_mutationDispatcher);
             _propertyChangeEmitter.ChangeCompleted += OnMutationCompleted;
@@ -84,11 +87,11 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 _workspaceChangedHandler = null;
             }
-            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator);
             _logicalTree.AttachChangeEmitter(_propertyChangeEmitter);
-            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator);
             _visualTree.AttachChangeEmitter(_propertyChangeEmitter);
-            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace);
+            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator);
             _combinedTree.AttachChangeEmitter(_propertyChangeEmitter);
             AttachScopePersistence(
                 _combinedTree,
@@ -499,7 +502,13 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            await _mutationDispatcher.UndoAsync().ConfigureAwait(false);
+            var result = await _mutationDispatcher.UndoAsync().ConfigureAwait(false);
+            if (result.Status == ChangeDispatchStatus.Success)
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => _runtimeCoordinator.ApplyUndo(),
+                    DispatcherPriority.Background);
+            }
         }
 
         private async Task RedoMutationAsync()
@@ -509,7 +518,13 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            await _mutationDispatcher.RedoAsync().ConfigureAwait(false);
+            var result = await _mutationDispatcher.RedoAsync().ConfigureAwait(false);
+            if (result.Status == ChangeDispatchStatus.Success)
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => _runtimeCoordinator.ApplyRedo(),
+                    DispatcherPriority.Background);
+            }
         }
 
         private void UpdateMutationCommandStates()

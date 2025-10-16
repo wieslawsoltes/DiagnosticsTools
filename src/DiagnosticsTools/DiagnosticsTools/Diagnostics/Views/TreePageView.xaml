@@ -92,6 +92,9 @@
           <MenuItem Header="Navigate to source"
                     Command="{Binding NavigateToSourceCommand}"
                     IsEnabled="{Binding CanNavigateToSource}" />
+          <MenuItem Header="Delete node"
+                    Command="{Binding DeleteNodeCommand}"
+                    IsEnabled="{Binding CanDeleteNode}" />
           <MenuItem Header="Copy">
             <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
             <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />

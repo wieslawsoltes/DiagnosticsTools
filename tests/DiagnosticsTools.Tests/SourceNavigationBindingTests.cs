@@ -7,6 +7,7 @@ using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using Avalonia.Diagnostics.Runtime;
 using Xunit;
 
 namespace DiagnosticsTools.Tests
@@ -41,7 +42,8 @@ namespace DiagnosticsTools.Tests
                 new HashSet<string>(),
                 infoService,
                 navigator,
-                workspace);
+                workspace,
+                new RuntimeMutationCoordinator());
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -85,7 +87,8 @@ namespace DiagnosticsTools.Tests
                 new HashSet<string>(),
                 infoService,
                 navigator,
-                workspace);
+                workspace,
+                new RuntimeMutationCoordinator());
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -127,7 +130,8 @@ namespace DiagnosticsTools.Tests
                 new HashSet<string>(),
                 infoService,
                 navigator,
-                workspace);
+                workspace,
+                new RuntimeMutationCoordinator());
 
             var previewTcs = new TaskCompletionSource<SourcePreviewViewModel?>();
             treeViewModel.SourcePreviewRequested += (_, preview) => previewTcs.TrySetResult(preview);

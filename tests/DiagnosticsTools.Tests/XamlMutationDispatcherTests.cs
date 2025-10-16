@@ -36,7 +36,7 @@ public class XamlMutationDispatcherTests : IDisposable
         await File.WriteAllTextAsync(_tempFile, initial);
 
         using var workspace = new XamlAstWorkspace();
-        var envelope = await CreateEnvelopeAsync(workspace, value: true);
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
 
         var dispatcher = new XamlMutationDispatcher(workspace);
         var result = await dispatcher.DispatchAsync(envelope);
@@ -57,7 +57,7 @@ public class XamlMutationDispatcherTests : IDisposable
         await File.WriteAllTextAsync(_tempFile, initial);
 
         using var workspace = new XamlAstWorkspace();
-        var envelope = await CreateEnvelopeAsync(workspace, value: true);
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
 
         // External modification breaking guard
         var mutated = initial.Replace("CheckBox", "CheckBox Content=\"Updated\"");
@@ -81,7 +81,7 @@ public class XamlMutationDispatcherTests : IDisposable
         await File.WriteAllTextAsync(_tempFile, initial);
 
         using var workspace = new XamlAstWorkspace();
-        var envelope = await CreateEnvelopeAsync(workspace, value: null);
+        var envelope = await CreateEnvelopeAsync(workspace, value: null, previousValue: true);
 
         var dispatcher = new XamlMutationDispatcher(workspace);
         var result = await dispatcher.DispatchAsync(envelope);
@@ -89,6 +89,54 @@ public class XamlMutationDispatcherTests : IDisposable
         Assert.Equal(ChangeDispatchStatus.Success, result.Status);
         var updated = await File.ReadAllTextAsync(_tempFile);
         Assert.DoesNotContain("IsChecked", updated, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public async Task DispatchAsync_Removes_Attribute_When_Reverting_To_Original_Value()
+    {
+        var initial = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <CheckBox x:Name="CheckOne" />
+</UserControl>
+""";
+        await File.WriteAllTextAsync(_tempFile, initial);
+
+        using var workspace = new XamlAstWorkspace();
+        var dispatcher = new XamlMutationDispatcher(workspace);
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher);
+
+        var document = await workspace.GetDocumentAsync(_tempFile);
+        var index = await workspace.GetIndexAsync(_tempFile);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "CheckBox");
+
+        var context = new PropertyChangeContext(
+            new DummyAvaloniaObject(),
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var firstResult = await emitter.EmitLocalValueChangeAsync(context, true, false, "ToggleCheckBox");
+        Assert.Equal(ChangeDispatchStatus.Success, firstResult.Status);
+        var mutated = await File.ReadAllTextAsync(_tempFile);
+        Assert.Contains("IsChecked=\"True\"", mutated, StringComparison.Ordinal);
+
+        document = await workspace.GetDocumentAsync(_tempFile);
+        index = await workspace.GetIndexAsync(_tempFile);
+        descriptor = Assert.Single(index.Nodes, n => n.LocalName == "CheckBox");
+        context = new PropertyChangeContext(
+            new DummyAvaloniaObject(),
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var secondResult = await emitter.EmitLocalValueChangeAsync(context, false, true, "ToggleCheckBox");
+        Assert.Equal(ChangeDispatchStatus.Success, secondResult.Status);
+        var reverted = await File.ReadAllTextAsync(_tempFile);
+        Assert.DoesNotContain("IsChecked", reverted, StringComparison.Ordinal);
     }
 
     [AvaloniaFact]
@@ -155,7 +203,7 @@ public class XamlMutationDispatcherTests : IDisposable
 
         using var xamlWorkspace = new XamlAstWorkspace();
         var dispatcher = new XamlMutationDispatcher(xamlWorkspace, workspace);
-        var envelope = await CreateEnvelopeAsync(xamlWorkspace, value: true);
+        var envelope = await CreateEnvelopeAsync(xamlWorkspace, value: true, previousValue: false);
 
         var result = await dispatcher.DispatchAsync(envelope);
 
@@ -212,7 +260,7 @@ public class XamlMutationDispatcherTests : IDisposable
 
         using var workspace = new XamlAstWorkspace();
         var dispatcher = new XamlMutationDispatcher(workspace);
-        var envelope = await CreateEnvelopeAsync(workspace, value: true);
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
 
         var dispatchResult = await dispatcher.DispatchAsync(envelope);
         Assert.Equal(ChangeDispatchStatus.Success, dispatchResult.Status);
@@ -241,7 +289,7 @@ public class XamlMutationDispatcherTests : IDisposable
 
         using var workspace = new XamlAstWorkspace();
         var dispatcher = new XamlMutationDispatcher(workspace);
-        var envelope = await CreateEnvelopeAsync(workspace, value: true);
+        var envelope = await CreateEnvelopeAsync(workspace, value: true, previousValue: false);
 
         await dispatcher.DispatchAsync(envelope);
         await dispatcher.UndoAsync();
@@ -341,7 +389,7 @@ public class XamlMutationDispatcherTests : IDisposable
         return (workspace, documentId);
     }
 
-    private async Task<ChangeEnvelope> CreateEnvelopeAsync(XamlAstWorkspace workspace, bool? value)
+    private async Task<ChangeEnvelope> CreateEnvelopeAsync(XamlAstWorkspace workspace, bool? value, bool? previousValue)
     {
         var document = await workspace.GetDocumentAsync(_tempFile);
         var index = await workspace.GetIndexAsync(_tempFile);
@@ -358,7 +406,7 @@ public class XamlMutationDispatcherTests : IDisposable
 
         var recorder = new CapturingDispatcher();
         var emitter = new PropertyInspectorChangeEmitter(recorder, () => DateTimeOffset.UtcNow, Guid.NewGuid);
-        await emitter.EmitLocalValueChangeAsync(context, value, "ToggleCheckBox");
+        await emitter.EmitLocalValueChangeAsync(context, value, previousValue, "ToggleCheckBox");
 
         return recorder.LastEnvelope ?? throw new InvalidOperationException("Envelope capture failed.");
     }
