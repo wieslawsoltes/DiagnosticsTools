@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -74,6 +75,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
             object? previousValue,
             string gesture,
             EditorCommandDescriptor? command = null,
+            IReadOnlyList<PropertyChangeContext>? additionalContexts = null,
+            IReadOnlyList<object?>? additionalPreviousValues = null,
             CancellationToken cancellationToken = default)
         {
             if (context is null)
@@ -87,19 +90,27 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
 
             var commandDescriptor = EditorCommandDescriptor.Normalize(command);
-            var plan = BuildLocalValueMutationPlan(context, newValue, previousValue, gesture, commandDescriptor);
+            var plan = BuildLocalValueMutationPlan(
+                BuildMutationTargets(context, previousValue, additionalContexts, additionalPreviousValues),
+                newValue,
+                gesture,
+                commandDescriptor);
             var envelope = plan.Envelope;
-            var origin = plan.Origin;
-            var originKey = plan.OriginKey;
-            var shouldUnset = plan.ShouldUnset;
-            var valueText = plan.AttributeValue;
+            var mutationTargets = plan.Targets;
 
-            var documentPath = context.Document.Path;
-            var pendingPathAdded = false;
-            if (!string.IsNullOrWhiteSpace(documentPath))
+            var pendingPaths = new HashSet<string>(PathComparer);
+            foreach (var target in mutationTargets)
             {
-                _pendingMutationInvalidations[documentPath] = _clock().Add(MutationSuppressionWindow);
-                pendingPathAdded = true;
+                var path = target.Context.Document.Path;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                if (pendingPaths.Add(path))
+                {
+                    _pendingMutationInvalidations[path] = _clock().Add(MutationSuppressionWindow);
+                }
             }
 
             var mutationApplied = false;
@@ -110,16 +121,27 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 if (result.Status == ChangeDispatchStatus.Success)
                 {
                     mutationApplied = true;
-                    UpdateMutationOriginBaseline(originKey, origin, shouldUnset, valueText, newValue);
+                    foreach (var target in mutationTargets)
+                    {
+                        UpdateMutationOriginBaseline(
+                            target.OriginKey,
+                            target.Origin,
+                            target.ShouldUnset,
+                            target.AttributeValue,
+                            newValue);
+                    }
                 }
 
                 return result;
             }
             finally
             {
-                if (pendingPathAdded && !mutationApplied && !string.IsNullOrWhiteSpace(documentPath))
+                if (!mutationApplied)
                 {
-                    _pendingMutationInvalidations.Remove(documentPath);
+                    foreach (var path in pendingPaths)
+                    {
+                        _pendingMutationInvalidations.Remove(path);
+                    }
                 }
             }
         }
@@ -130,6 +152,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
             object? previousValue,
             string gesture,
             EditorCommandDescriptor? command = null,
+            IReadOnlyList<PropertyChangeContext>? additionalContexts = null,
+            IReadOnlyList<object?>? additionalPreviousValues = null,
             CancellationToken cancellationToken = default)
         {
             if (context is null)
@@ -156,7 +180,11 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
 
             var commandDescriptor = EditorCommandDescriptor.Normalize(command);
-            var plan = BuildLocalValueMutationPlan(context, newValue, previousValue, gesture, commandDescriptor);
+            var plan = BuildLocalValueMutationPlan(
+                BuildMutationTargets(context, previousValue, additionalContexts, additionalPreviousValues),
+                newValue,
+                gesture,
+                commandDescriptor);
             return await xamlDispatcher.PreviewAsync(plan.Envelope, cancellationToken).ConfigureAwait(false);
         }
 
@@ -221,34 +249,387 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
+        private static IReadOnlyList<(PropertyChangeContext Context, object? PreviousValue)> BuildMutationTargets(
+            PropertyChangeContext primaryContext,
+            object? primaryPreviousValue,
+            IReadOnlyList<PropertyChangeContext>? additionalContexts,
+            IReadOnlyList<object?>? additionalPreviousValues)
+        {
+            if (primaryContext is null)
+            {
+                throw new ArgumentNullException(nameof(primaryContext));
+            }
+
+            if (additionalContexts is null || additionalContexts.Count == 0)
+            {
+                return new[] { (primaryContext, primaryPreviousValue) };
+            }
+
+            if (additionalPreviousValues is not null && additionalPreviousValues.Count != additionalContexts.Count)
+            {
+                throw new ArgumentException("additionalPreviousValues length must match additionalContexts length.", nameof(additionalPreviousValues));
+            }
+
+            var result = new (PropertyChangeContext Context, object? PreviousValue)[additionalContexts.Count + 1];
+            result[0] = (primaryContext, primaryPreviousValue);
+            for (var index = 0; index < additionalContexts.Count; index++)
+            {
+                var context = additionalContexts[index];
+                if (context is null)
+                {
+                    throw new ArgumentNullException(nameof(additionalContexts), "Additional mutation contexts must not contain null entries.");
+                }
+
+                var previous = additionalPreviousValues is not null ? additionalPreviousValues[index] : null;
+                result[index + 1] = (context, previous);
+            }
+
+            return result;
+        }
+
         private LocalValueMutationPlan BuildLocalValueMutationPlan(
-            PropertyChangeContext context,
+            IReadOnlyList<(PropertyChangeContext Context, object? PreviousValue)> targets,
             object? newValue,
-            object? previousValue,
             string gesture,
             EditorCommandDescriptor commandDescriptor)
         {
-            var origin = GetOrCreateMutationOrigin(context, previousValue, out var originKey);
-            var attributeName = BuildAttributeName(context.Property);
-            var shouldUnset = ShouldUnsetAttribute(origin, newValue);
-            var valueKind = shouldUnset ? "Unset" : DetermineValueKind(newValue);
-            var bindingPayload = shouldUnset ? null : BuildBindingPayload(newValue);
-            var resourcePayload = shouldUnset ? null : BuildResourcePayload(newValue);
-            var valueText = shouldUnset ? null : DetermineAttributeValueText(context.Property, newValue, origin);
-            var adjustedCommand = EnsureCommandDescriptor(commandDescriptor, context.Property.PropertyType, newValue, gesture);
+            if (targets is null)
+            {
+                throw new ArgumentNullException(nameof(targets));
+            }
 
-            var envelope = BuildSetAttributeEnvelope(
-                context,
-                attributeName,
-                valueKind,
-                valueText,
-                bindingPayload,
-                resourcePayload,
-                shouldUnset,
-                gesture,
-                adjustedCommand);
+            if (targets.Count == 0)
+            {
+                throw new ArgumentException("At least one mutation target is required.", nameof(targets));
+            }
 
-            return new LocalValueMutationPlan(envelope, origin, originKey, shouldUnset, valueText, adjustedCommand);
+            var primary = targets[0];
+            var primaryContext = primary.Context;
+
+            var documentPath = primaryContext.Document.Path;
+            foreach (var target in targets)
+            {
+                if (!string.Equals(target.Context.Document.Path, documentPath, PathComparison))
+                {
+                    throw new InvalidOperationException("Multi-selection edits require all targets to originate from the same XAML document.");
+                }
+
+                if (!ReferenceEquals(target.Context.Property, primaryContext.Property))
+                {
+                    throw new InvalidOperationException("Multi-selection edits require all targets to reference the same AvaloniaProperty.");
+                }
+            }
+
+            var attributeName = BuildAttributeName(primaryContext.Property);
+            var valueKind = DetermineValueKind(newValue);
+            var bindingPayload = BuildBindingPayload(newValue);
+            var resourcePayload = BuildResourcePayload(newValue);
+            var adjustedCommand = EnsureCommandDescriptor(commandDescriptor, primaryContext.Property.PropertyType, newValue, gesture);
+
+            var operations = new List<ChangeOperation>(targets.Count);
+            var mutationTargets = new List<MutationTargetPlan>(targets.Count);
+
+            for (var index = 0; index < targets.Count; index++)
+            {
+                var target = targets[index];
+                var context = target.Context;
+
+                var origin = GetOrCreateMutationOrigin(context, target.PreviousValue, out var originKey);
+                var shouldUnset = ShouldUnsetAttribute(origin, newValue);
+                var effectiveValueKind = shouldUnset ? "Unset" : valueKind;
+                var effectiveBindingPayload = shouldUnset ? null : bindingPayload;
+                var effectiveResourcePayload = shouldUnset ? null : resourcePayload;
+                var valueText = shouldUnset ? null : DetermineAttributeValueText(context.Property, newValue, origin);
+
+                var operation = BuildSetAttributeOperation(
+                    context,
+                    attributeName,
+                    effectiveValueKind,
+                    valueText,
+                    effectiveBindingPayload,
+                    effectiveResourcePayload,
+                    shouldUnset,
+                    gesture,
+                    adjustedCommand,
+                    index);
+
+                operations.Add(operation);
+                mutationTargets.Add(new MutationTargetPlan(context, origin, originKey, shouldUnset, valueText));
+            }
+
+            var envelope = BuildSetAttributeEnvelope(primaryContext, gesture, adjustedCommand, operations, mutationTargets);
+            return new LocalValueMutationPlan(envelope, mutationTargets, adjustedCommand);
+        }
+
+        private NamespaceRequirement? DetermineNamespaceRequirement(PropertyChangeContext context, string attributeName, string? valueText)
+        {
+            if (context is null)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(attributeName))
+            {
+                var colonIndex = attributeName.IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    var prefix = attributeName.Substring(0, colonIndex);
+                    if (!string.Equals(prefix, "xmlns", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (ResolveNamespaceForPrefix(context, prefix) is { } attributeRequirement)
+                        {
+                            return attributeRequirement;
+                        }
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(valueText))
+            {
+                foreach (var candidatePrefix in ExtractPrefixesFromValue(valueText))
+                {
+                    var valueRequirement = ResolveNamespaceForPrefix(context, candidatePrefix) ??
+                                           BuildNamespaceFallback(context, candidatePrefix);
+                    if (valueRequirement is not null)
+                    {
+                        return valueRequirement;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryGetNamespaceDeclaration(PropertyChangeContext context, string prefix, out string? value)
+        {
+            var attributeName = string.IsNullOrEmpty(prefix) ? "xmlns" : $"xmlns:{prefix}";
+            if (XamlGuardUtilities.TryLocateAttribute(context.Document, context.Descriptor, attributeName, out var attribute, out _)
+                && attribute is not null &&
+                attribute.ValueNode is { } valueNode)
+            {
+                var text = context.Document.Text;
+                var raw = text.Substring(valueNode.Span.Start, valueNode.Span.Length);
+                value = TrimQuotes(raw);
+                return true;
+            }
+
+            value = null;
+            return false;
+        }
+
+        private NamespaceRequirement? ResolveNamespaceForPrefix(PropertyChangeContext context, string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+            {
+                return null;
+            }
+
+            if (TryGetNamespaceDeclaration(context, prefix, out var existingValue) && !string.IsNullOrEmpty(existingValue))
+            {
+                return new NamespaceRequirement(prefix, existingValue);
+            }
+
+            if (string.Equals(prefix, "x", StringComparison.Ordinal))
+            {
+                return new NamespaceRequirement(prefix, "http://schemas.microsoft.com/winfx/2006/xaml");
+            }
+
+            var ownerType = context.Property.OwnerType;
+            var clrNamespace = ownerType.Namespace;
+            if (string.IsNullOrEmpty(clrNamespace))
+            {
+                return null;
+            }
+
+            var assemblyName = ownerType.Assembly.GetName().Name;
+            var builder = new StringBuilder();
+            builder.Append("clr-namespace:");
+            builder.Append(clrNamespace);
+
+            if (!string.IsNullOrEmpty(assemblyName))
+            {
+                builder.Append(";assembly=");
+                builder.Append(assemblyName);
+            }
+
+            return new NamespaceRequirement(prefix, builder.ToString());
+        }
+
+        private static NamespaceRequirement? BuildNamespaceFallback(PropertyChangeContext context, string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+            {
+                return null;
+            }
+
+            var ownerType = context.Property.OwnerType;
+            var clrNamespace = ownerType.Namespace;
+            if (string.IsNullOrEmpty(clrNamespace))
+            {
+                return null;
+            }
+
+            var assemblyName = ownerType.Assembly.GetName().Name;
+            var builder = new StringBuilder();
+            builder.Append("clr-namespace:");
+            builder.Append(clrNamespace);
+
+            if (!string.IsNullOrEmpty(assemblyName))
+            {
+                builder.Append(";assembly=");
+                builder.Append(assemblyName);
+            }
+
+            return new NamespaceRequirement(prefix, builder.ToString());
+        }
+
+        private static IEnumerable<string> ExtractPrefixesFromValue(string valueText)
+        {
+            if (string.IsNullOrEmpty(valueText))
+            {
+                yield break;
+            }
+
+            for (var index = 0; index < valueText.Length; index++)
+            {
+                if (valueText[index] != '{')
+                {
+                    continue;
+                }
+
+                var start = index + 1;
+                if (start >= valueText.Length)
+                {
+                    break;
+                }
+
+                var end = start;
+                while (end < valueText.Length && !char.IsWhiteSpace(valueText[end]) && valueText[end] != '}' && valueText[end] != ',')
+                {
+                    end++;
+                }
+
+                if (end <= start)
+                {
+                    continue;
+                }
+
+                var token = valueText.Substring(start, end - start);
+                var colonIndex = token.IndexOf(':');
+                if (colonIndex <= 0)
+                {
+                    continue;
+                }
+
+                var prefix = token.Substring(0, colonIndex);
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    yield return prefix;
+                }
+            }
+        }
+
+
+        private IReadOnlyList<ChangeOperation> CombineWithNamespaceImports(
+            IReadOnlyList<ChangeOperation> operations,
+            IReadOnlyList<MutationTargetPlan> mutationTargets)
+        {
+            if (operations.Count == 0)
+            {
+                return operations;
+            }
+
+            var namespaceOperations = new List<ChangeOperation>();
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            var count = Math.Min(operations.Count, mutationTargets.Count);
+            for (var index = 0; index < count; index++)
+            {
+                var operation = operations[index];
+                var payload = operation.Payload;
+
+                if (payload is null || string.IsNullOrWhiteSpace(payload.NamespacePrefix) || string.IsNullOrWhiteSpace(payload.Namespace))
+                {
+                    continue;
+                }
+
+                var target = mutationTargets[index].Context;
+                var prefix = payload.NamespacePrefix!;
+                var namespaceValue = payload.Namespace;
+
+                var key = $"{target.Descriptor.Id}:{prefix}";
+                if (!seenKeys.Add(key))
+                {
+                    continue;
+                }
+
+                if (HasNamespaceDeclaration(target, prefix, namespaceValue))
+                {
+                    continue;
+                }
+
+                var nsOperation = BuildNamespaceOperation(target, prefix, namespaceValue, namespaceOperations.Count);
+                namespaceOperations.Add(nsOperation);
+            }
+
+            if (namespaceOperations.Count == 0)
+            {
+                return operations;
+            }
+
+            var combined = new ChangeOperation[namespaceOperations.Count + operations.Count];
+            namespaceOperations.CopyTo(combined, 0);
+            for (var i = 0; i < operations.Count; i++)
+            {
+                combined[namespaceOperations.Count + i] = operations[i];
+            }
+
+            return combined;
+        }
+
+        private bool HasNamespaceDeclaration(PropertyChangeContext context, string prefix, string expectedValue)
+        {
+            return TryGetNamespaceDeclaration(context, prefix, out var existingValue) &&
+                   string.Equals(existingValue, expectedValue, StringComparison.Ordinal);
+        }
+
+        private ChangeOperation BuildNamespaceOperation(
+            PropertyChangeContext context,
+            string prefix,
+            string namespaceValue,
+            int index)
+        {
+            var attributeName = string.IsNullOrEmpty(prefix) ? "xmlns" : $"xmlns:{prefix}";
+            var descriptor = context.Descriptor;
+            var document = context.Document;
+
+            var targetInfo = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.ToString(),
+                Path = BuildTargetPath(descriptor, attributeName),
+                NodeType = AttributeNodeType
+            };
+
+            var spanHash = XamlGuardUtilities.ComputeAttributeHash(document, descriptor, attributeName);
+
+            return new ChangeOperation
+            {
+                Id = $"ns-{index + 1}",
+                Type = ChangeOperationTypes.SetNamespace,
+                Target = targetInfo,
+                Payload = new ChangePayload
+                {
+                    Name = attributeName,
+                    Namespace = namespaceValue,
+                    NamespacePrefix = prefix,
+                    ValueKind = "Literal",
+                    NewValue = namespaceValue
+                },
+                Guard = new ChangeOperationGuard
+                {
+                    SpanHash = spanHash
+                }
+            };
         }
 
         private void InvalidateMutationOrigins(string? path)
@@ -280,7 +661,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
-        private ChangeEnvelope BuildSetAttributeEnvelope(
+        private ChangeOperation BuildSetAttributeOperation(
             PropertyChangeContext context,
             string attributeName,
             string valueKind,
@@ -289,7 +670,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
             ResourcePayload? resourcePayload,
             bool shouldUnset,
             string gesture,
-            EditorCommandDescriptor command)
+            EditorCommandDescriptor command,
+            int operationIndex)
         {
             var descriptor = context.Descriptor;
             var document = context.Document;
@@ -308,10 +690,13 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 NodeType = AttributeNodeType
             };
 
+            var namespaceRequirement = DetermineNamespaceRequirement(context, attributeName, valueText);
+
             var payload = new ChangePayload
             {
                 Name = attributeName,
-                Namespace = string.Empty,
+                Namespace = namespaceRequirement?.Value ?? string.Empty,
+                NamespacePrefix = namespaceRequirement?.Prefix,
                 ValueKind = valueKind,
                 NewValue = shouldUnset ? null : valueText,
                 Binding = bindingPayload,
@@ -320,7 +705,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             var operation = new ChangeOperation
             {
-                Id = "op-1",
+                Id = $"op-{operationIndex + 1}",
                 Type = ChangeOperationTypes.SetAttribute,
                 Target = targetInfo,
                 Payload = payload,
@@ -330,7 +715,42 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 }
             };
 
-            var envelope = new ChangeEnvelope
+            return operation;
+        }
+
+        private ChangeEnvelope BuildSetAttributeEnvelope(
+            PropertyChangeContext primaryContext,
+            string gesture,
+            EditorCommandDescriptor command,
+            IReadOnlyList<ChangeOperation> operations,
+            IReadOnlyList<MutationTargetPlan> mutationTargets)
+        {
+            if (operations is null)
+            {
+                throw new ArgumentNullException(nameof(operations));
+            }
+
+            if (operations.Count == 0)
+            {
+                throw new ArgumentException("At least one change operation is required.", nameof(operations));
+            }
+
+            var effectiveOperations = CombineWithNamespaceImports(operations, mutationTargets);
+
+            var document = primaryContext.Document;
+            var property = primaryContext.Property;
+            var target = primaryContext.Target;
+            var descriptor = primaryContext.Descriptor;
+            var elementId = BuildElementId(target);
+            var propertyQualifiedName = $"{property.OwnerType.Name}.{property.Name}";
+
+            var changes = new ChangeOperation[effectiveOperations.Count];
+            for (var index = 0; index < effectiveOperations.Count; index++)
+            {
+                changes[index] = effectiveOperations[index];
+            }
+
+            return new ChangeEnvelope
             {
                 BatchId = _idProvider(),
                 InitiatedAt = _clock(),
@@ -353,18 +773,16 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     AstNodeId = descriptor.Id.ToString(),
                     Property = propertyQualifiedName,
                     PropertyPath = propertyQualifiedName,
-                    Frame = context.Frame,
-                    ValueSource = context.ValueSource
+                    Frame = primaryContext.Frame,
+                    ValueSource = primaryContext.ValueSource
                 },
                 Guards = new ChangeGuardsInfo
                 {
                     DocumentVersion = document.Version.ToString(),
                     RuntimeFingerprint = elementId
                 },
-                Changes = new[] { operation }
+                Changes = changes
             };
-
-            return envelope;
         }
 
         private static EditorCommandDescriptor EnsureCommandDescriptor(
@@ -807,13 +1225,19 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
-        private readonly record struct LocalValueMutationPlan(
+        private sealed record class LocalValueMutationPlan(
             ChangeEnvelope Envelope,
+            IReadOnlyList<MutationTargetPlan> Targets,
+            EditorCommandDescriptor Command);
+
+        private readonly record struct MutationTargetPlan(
+            PropertyChangeContext Context,
             PropertyMutationOrigin Origin,
             MutationOriginKey OriginKey,
             bool ShouldUnset,
-            string? AttributeValue,
-            EditorCommandDescriptor Command);
+            string? AttributeValue);
+
+        private readonly record struct NamespaceRequirement(string Prefix, string Value);
 
         private readonly record struct PropertyMutationOrigin(
             MutationOriginSnapshot Initial,

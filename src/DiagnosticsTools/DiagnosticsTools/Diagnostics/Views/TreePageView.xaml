@@ -64,24 +64,32 @@
                    PointerExited="RemoveAdorner">
       <virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
         <DataTemplate x:DataType="vm:TreeNode">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <StackPanel.Styles>
-              <Style Selector="StackPanel[Tag=True]">
-                <Setter Property="Opacity" Value="0.5"/>
+          <Border Tag="{Binding IsMultiSelected}">
+            <Border.Styles>
+              <Style Selector="Border[Tag=True]">
+                <Setter Property="Background" Value="{DynamicResource ThemeAccentBrush}"/>
+                <Setter Property="Opacity" Value="0.15"/>
               </Style>
-            </StackPanel.Styles>
-            <StackPanel.Tag>
-              <Binding Path="IsInTemplate" FallbackValue="False"/>
-            </StackPanel.Tag>
-            <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
-            <TextBlock Text="SRC"
-                       FontSize="10"
-                       FontWeight="Bold"
-                       IsVisible="{Binding HasSource}"
-                       ToolTip.Tip="{Binding SourceSummary}"/>
-            <TextBlock Text="{Binding Classes}"/>
-            <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
-          </StackPanel>
+            </Border.Styles>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <StackPanel.Styles>
+                <Style Selector="StackPanel[Tag=True]">
+                  <Setter Property="Opacity" Value="0.5"/>
+                </Style>
+              </StackPanel.Styles>
+              <StackPanel.Tag>
+                <Binding Path="IsInTemplate" FallbackValue="False"/>
+              </StackPanel.Tag>
+              <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
+              <TextBlock Text="SRC"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         IsVisible="{Binding HasSource}"
+                         ToolTip.Tip="{Binding SourceSummary}"/>
+              <TextBlock Text="{Binding Classes}"/>
+              <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
+            </StackPanel>
+          </Border>
         </DataTemplate>
       </virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
       <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
@@ -95,10 +103,31 @@
           <MenuItem Header="Delete node"
                     Command="{Binding DeleteNodeCommand}"
                     IsEnabled="{Binding CanDeleteNode}" />
+          <MenuItem Header="Edit template (live preview)"
+                    Command="{Binding EditTemplateCommand}"
+                    IsEnabled="{Binding CanEditTemplate}" />
+          <MenuItem Header="Add to multi-selection"
+                    Command="{Binding AddToMultiSelectionCommand}"
+                    IsEnabled="{Binding CanAddToMultiSelection}" />
+          <MenuItem Header="Remove from multi-selection"
+                    Command="{Binding RemoveFromMultiSelectionCommand}"
+                    IsEnabled="{Binding CanRemoveFromMultiSelection}" />
+          <MenuItem Header="Clear multi-selection"
+                    Command="{Binding ClearMultiSelectionCommand}"
+                    IsEnabled="{Binding HasMultiSelection}" />
           <MenuItem Header="Copy">
             <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
             <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
           </MenuItem>
+          <MenuItem Header="Copy subtree XAML"
+                    IsEnabled="{Binding CanCopySubtree}"
+                    Click="CopySubtreeClick" />
+          <MenuItem Header="Paste subtree as child"
+                    IsEnabled="{Binding CanPasteSubtree}"
+                    Click="PasteSubtreeChildClick" />
+          <MenuItem Header="Paste subtree as sibling"
+                    IsEnabled="{Binding CanPasteSubtree}"
+                    Click="PasteSubtreeSiblingClick" />
           <MenuItem Header="-" />
           <MenuItem Header="Scope to this subtree"
                     Command="{Binding ScopeToSubTree}"

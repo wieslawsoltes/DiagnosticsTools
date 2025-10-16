@@ -22,6 +22,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _isVisible = true;
         private SourceInfo? _sourceInfo;
         private XamlAstNodeDescriptor? _xamlDescriptor;
+        private bool _isMultiSelected;
 
         protected TreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customTypeName = null)
         {
@@ -154,6 +155,12 @@ namespace Avalonia.Diagnostics.ViewModels
         public string? SourceSummary => SourceInfo?.DisplayPath;
 
         public bool HasSource => SourceInfo is not null;
+
+        public bool IsMultiSelected
+        {
+            get => _isMultiSelected;
+            internal set => RaiseAndSetIfChanged(ref _isMultiSelected, value);
+        }
 
         public void Dispose()
         {

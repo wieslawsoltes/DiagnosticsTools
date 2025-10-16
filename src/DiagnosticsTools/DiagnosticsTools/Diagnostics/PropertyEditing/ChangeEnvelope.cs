@@ -157,6 +157,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
         [JsonPropertyName("namespace")]
         public string Namespace { get; init; } = string.Empty;
 
+        [JsonPropertyName("namespacePrefix")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? NamespacePrefix { get; init; }
+
         [JsonPropertyName("valueKind")]
         public string ValueKind { get; init; } = "Literal";
 

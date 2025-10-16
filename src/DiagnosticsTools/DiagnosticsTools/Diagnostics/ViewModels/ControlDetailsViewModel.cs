@@ -689,13 +689,17 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
+            var additionalTargets = await TreePage.BuildAdditionalMutationContextsAsync(viewModel.Property).ConfigureAwait(false);
+            var additionalContexts = additionalTargets.Contexts;
+            var additionalPreviousValues = additionalTargets.PreviousValues;
+
             var gesture = DetermineGesture(viewModel.Property, newValue);
             var command = DetermineEditorCommand(viewModel, newValue);
             var previous = viewModel.PreviousValue;
 
             MutationStatusMessage = null;
 
-            var preview = await changeEmitter.PreviewLocalValueChangeAsync(context, newValue, previous, gesture, command).ConfigureAwait(false);
+            var preview = await changeEmitter.PreviewLocalValueChangeAsync(context, newValue, previous, gesture, command, additionalContexts, additionalPreviousValues).ConfigureAwait(false);
             var decision = await ShowMutationPreviewAsync(context, preview).ConfigureAwait(false);
             if (decision != MutationPreviewDecision.Apply)
             {
@@ -712,7 +716,7 @@ namespace Avalonia.Diagnostics.ViewModels
             ChangeDispatchResult result;
             try
             {
-                result = await changeEmitter.EmitLocalValueChangeAsync(context, newValue, previous, gesture, command).ConfigureAwait(false);
+                result = await changeEmitter.EmitLocalValueChangeAsync(context, newValue, previous, gesture, command, additionalContexts, additionalPreviousValues).ConfigureAwait(false);
             }
             finally
             {
@@ -724,12 +728,35 @@ namespace Avalonia.Diagnostics.ViewModels
 
             if (result.Status == ChangeDispatchStatus.Success)
             {
-                if (_runtimeCoordinator is not null && mutationTarget is AvaloniaObject target && mutationProperty is AvaloniaProperty property && !Equals(previous, newValue))
+                await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                        _runtimeCoordinator.RegisterPropertyChange(target, property, previous, newValue),
-                        DispatcherPriority.Background);
-                }
+                    if (mutationTarget is AvaloniaObject target && mutationProperty is AvaloniaProperty property)
+                    {
+                        ApplyRuntimeValue(target, property, newValue);
+                        if (_runtimeCoordinator is not null && !Equals(previous, newValue))
+                        {
+                            _runtimeCoordinator.RegisterPropertyChange(target, property, previous, newValue);
+                        }
+                    }
+
+                    if (additionalContexts.Count > 0)
+                    {
+                        for (var index = 0; index < additionalContexts.Count; index++)
+                        {
+                            var additionalContext = additionalContexts[index];
+                            var previousValue = additionalPreviousValues[index];
+                            if (additionalContext.Target is AvaloniaObject additionalTarget &&
+                                additionalContext.Property is AvaloniaProperty additionalProperty)
+                            {
+                                ApplyRuntimeValue(additionalTarget, additionalProperty, newValue);
+                                if (_runtimeCoordinator is not null && !Equals(previousValue, newValue))
+                                {
+                                    _runtimeCoordinator.RegisterPropertyChange(additionalTarget, additionalProperty, previousValue, newValue);
+                                }
+                            }
+                        }
+                    }
+                }, DispatcherPriority.Background);
 
                 return;
             }
@@ -752,6 +779,18 @@ namespace Avalonia.Diagnostics.ViewModels
                 selection.Node,
                 frame: "LocalValue",
                 valueSource: "LocalValue");
+        }
+
+        private static void ApplyRuntimeValue(AvaloniaObject target, AvaloniaProperty property, object? value)
+        {
+            if (value is null || ReferenceEquals(value, AvaloniaProperty.UnsetValue))
+            {
+                target.ClearValue(property);
+            }
+            else
+            {
+                target.SetValue(property, value);
+            }
         }
 
         private static string DetermineGesture(AvaloniaProperty property, object? newValue)

@@ -3,12 +3,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.Xaml;
 using Microsoft.Language.Xml;
 using Xunit;
+using System.Linq;
+using Xunit.Sdk;
+using System.Reflection;
+using System.Collections.Generic;
 
 namespace DiagnosticsTools.Tests;
 
@@ -116,6 +121,125 @@ public class PropertyInspectorChangeEmitterTests
         Assert.Equal(ChangeOperationTypes.SetAttribute, operation.Type);
         Assert.Equal("Unset", operation.Payload.ValueKind);
         Assert.Null(operation.Payload.NewValue);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Supports_MultiSelection()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <StackPanel>
+    <CheckBox x:Name="First" />
+    <CheckBox x:Name="Second" />
+  </StackPanel>
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptors = index.Nodes.Where(n => n.LocalName == "CheckBox").ToArray();
+        Assert.Equal(2, descriptors.Length);
+
+        var targetOne = new DummyAvaloniaObject();
+        var targetTwo = new DummyAvaloniaObject();
+
+        var contextOne = new PropertyChangeContext(
+            targetOne,
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptors[0],
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var contextTwo = new PropertyChangeContext(
+            targetTwo,
+            ToggleButton.IsCheckedProperty,
+            document,
+            descriptors[1],
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var fixedTime = new DateTimeOffset(2024, 03, 10, 12, 34, 56, TimeSpan.Zero);
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher, () => fixedTime, () => Guid.Parse("00000000-0000-0000-0000-000000000789"));
+
+        await emitter.EmitLocalValueChangeAsync(
+            contextOne,
+            true,
+            false,
+            "ToggleCheckBox",
+            command: null,
+            additionalContexts: new[] { contextTwo },
+            additionalPreviousValues: new object?[] { false });
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        Assert.Equal(2, envelope!.Changes.Count);
+
+        var firstOperation = envelope.Changes[0];
+        var secondOperation = envelope.Changes[1];
+
+        Assert.Equal(ChangeOperationTypes.SetAttribute, firstOperation.Type);
+        Assert.Equal(ChangeOperationTypes.SetAttribute, secondOperation.Type);
+        Assert.Equal(descriptors[0].Id.ToString(), firstOperation.Target.DescriptorId);
+        Assert.Equal(descriptors[1].Id.ToString(), secondOperation.Target.DescriptorId);
+        Assert.Equal("True", firstOperation.Payload.NewValue);
+        Assert.Equal("True", secondOperation.Payload.NewValue);
+    }
+
+    [AvaloniaFact]
+    public async Task EmitLocalValueChangeAsync_Adds_Namespace_When_Value_Uses_Prefix()
+    {
+        var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui">
+  <ContentControl x:Name="Host" />
+</UserControl>
+""";
+        var normalized = xaml.Replace("\r\n", "\n");
+        var syntax = Parser.ParseText(normalized);
+        var diagnostics = XamlDiagnosticMapper.CollectDiagnostics(syntax);
+        var checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+        var version = new XamlDocumentVersion(DateTimeOffset.UnixEpoch, normalized.Length, checksum);
+        var document = new XamlAstDocument("/tmp/MainWindow.axaml", normalized, syntax, version, diagnostics);
+        var index = XamlAstIndex.Build(document);
+        var descriptor = Assert.Single(index.Nodes, n => n.LocalName == "ContentControl");
+
+        var target = new ContentControl();
+        var context = new PropertyChangeContext(
+            target,
+            ContentControl.ContentProperty,
+            document,
+            descriptor,
+            frame: "LocalValue",
+            valueSource: "LocalValue");
+
+        var dispatcher = new RecordingDispatcher();
+        var emitter = new PropertyInspectorChangeEmitter(dispatcher, () => DateTimeOffset.UtcNow, Guid.NewGuid);
+
+        Assert.Equal("Avalonia.Controls", ContentControl.ContentProperty.OwnerType.Namespace);
+
+        var extractMethod = typeof(PropertyInspectorChangeEmitter).GetMethod("ExtractPrefixesFromValue", BindingFlags.NonPublic | BindingFlags.Static);
+        var prefixes = ((IEnumerable<string>)extractMethod!.Invoke(null, new object?[] { "{local:DemoContent}" })!).ToList();
+        Assert.Contains("local", prefixes);
+
+        await emitter.EmitLocalValueChangeAsync(context, "{local:DemoContent}", null, "SetLocalValue");
+
+        var envelope = dispatcher.LastEnvelope;
+        Assert.NotNull(envelope);
+        var operations = envelope!.Changes;
+        Assert.NotEmpty(operations);
+        var attributeOperation = operations.Last();
+        Assert.Equal(ChangeOperationTypes.SetAttribute, attributeOperation.Type);
+        Assert.Equal("{local:DemoContent}", attributeOperation.Payload.NewValue);
+        Assert.Equal("local", attributeOperation.Payload.NamespacePrefix);
+        Assert.Contains("clr-namespace", attributeOperation.Payload.Namespace, StringComparison.Ordinal);
+        var namespaceOperation = operations.FirstOrDefault(op => op.Type == ChangeOperationTypes.SetNamespace);
+        Assert.NotNull(namespaceOperation);
+        Assert.Equal("xmlns:local", namespaceOperation!.Payload.Name);
     }
 
     private sealed class RecordingDispatcher : IChangeDispatcher

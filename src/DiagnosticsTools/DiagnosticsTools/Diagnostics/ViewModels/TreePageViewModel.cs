@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -56,6 +57,16 @@ namespace Avalonia.Diagnostics.ViewModels
         private const string TreeContextValueSource = "Tree";
         private int _xamlSelectionRevision;
         private PropertyInspectorChangeEmitter? _changeEmitter;
+        private readonly ObservableCollection<TreeNode> _multiSelection = new();
+        private readonly DelegateCommand _addToMultiSelectionCommand;
+        private readonly DelegateCommand _removeFromMultiSelectionCommand;
+        private readonly DelegateCommand _clearMultiSelectionCommand;
+        private readonly DelegateCommand _editTemplateCommand;
+        internal enum SubtreePasteMode
+        {
+            Child,
+            Sibling
+        }
 
         private static readonly StringComparer PathComparer =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -91,9 +102,13 @@ namespace Avalonia.Diagnostics.ViewModels
             TreeFilter = new FilterViewModel();
             TreeFilter.RefreshFilter += (s, e) => ApplyTreeFilter();
 
-            _previewSourceCommand = new DelegateCommand(PreviewSourceAsync, () => CanPreviewSource);
+            _previewSourceCommand = new DelegateCommand(() => PreviewSourceInternalAsync(forceSplitView: false), () => CanPreviewSource);
             _navigateToSourceCommand = new DelegateCommand(NavigateToSourceAsync, () => CanNavigateToSource);
             _deleteNodeCommand = new DelegateCommand(DeleteNodeAsync, () => CanDeleteNode);
+            _addToMultiSelectionCommand = new DelegateCommand(AddSelectedNodeToMultiSelection, () => CanAddToMultiSelection);
+            _removeFromMultiSelectionCommand = new DelegateCommand(RemoveSelectedNodeFromMultiSelection, () => CanRemoveFromMultiSelection);
+            _clearMultiSelectionCommand = new DelegateCommand(ClearMultiSelection, () => HasMultiSelection);
+            _editTemplateCommand = new DelegateCommand(EditTemplateAsync, () => CanEditTemplate);
         }
 
     public event EventHandler<string>? ClipboardCopyRequested;
@@ -112,6 +127,28 @@ namespace Avalonia.Diagnostics.ViewModels
             get => _nodes;
             protected set => RaiseAndSetIfChanged(ref _nodes, value);
         }
+
+        public IReadOnlyList<TreeNode> MultiSelection => _multiSelection;
+
+        public bool HasMultiSelection => _multiSelection.Count > 0;
+
+        public bool CanAddToMultiSelection => SelectedNode is not null && !_multiSelection.Contains(SelectedNode);
+
+        public bool CanRemoveFromMultiSelection => SelectedNode is not null && _multiSelection.Contains(SelectedNode);
+
+        public bool CanEditTemplate => SelectedNode is CombinedTreeNode templateNode && templateNode.Role == CombinedTreeNode.CombinedNodeRole.Template;
+
+        public bool CanCopySubtree => SelectedNodeXaml?.Node is not null;
+
+        public bool CanPasteSubtree => SelectedNodeXaml?.Node is not null;
+
+        public ICommand AddToMultiSelectionCommand => _addToMultiSelectionCommand;
+
+        public ICommand RemoveFromMultiSelectionCommand => _removeFromMultiSelectionCommand;
+
+        public ICommand ClearMultiSelectionCommand => _clearMultiSelectionCommand;
+
+        public ICommand EditTemplateCommand => _editTemplateCommand;
 
         public TreeSearchField SelectedTreeSearchField
         {
@@ -154,6 +191,11 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(CanScopeToSubTree));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
                     RaisePropertyChanged(nameof(CanPreviewSource));
+                    RaisePropertyChanged(nameof(CanAddToMultiSelection));
+                    RaisePropertyChanged(nameof(CanRemoveFromMultiSelection));
+                    RaisePropertyChanged(nameof(CanEditTemplate));
+                    RaisePropertyChanged(nameof(CanCopySubtree));
+                    RaisePropertyChanged(nameof(CanPasteSubtree));
                     UpdateCommandStates();
                     SelectedNodeSourceInfo = null;
                     SelectedNodeXaml = null;
@@ -173,6 +215,8 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(HasSelectedNodeSource));
                     RaisePropertyChanged(nameof(CanNavigateToSource));
                     RaisePropertyChanged(nameof(CanPreviewSource));
+                    RaisePropertyChanged(nameof(CanCopySubtree));
+                    RaisePropertyChanged(nameof(CanPasteSubtree));
                     UpdateCommandStates();
                 }
             }
@@ -223,6 +267,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     NotifyPreviewSelectionChanged(value);
                     RaisePropertyChanged(nameof(CanDeleteNode));
+                    RaisePropertyChanged(nameof(CanCopySubtree));
+                    RaisePropertyChanged(nameof(CanPasteSubtree));
                     UpdateCommandStates();
                 }
             }
@@ -316,6 +362,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void Dispose()
         {
+            ClearMultiSelection();
+
             foreach (var node in Nodes)
             {
                 node.Dispose();
@@ -376,10 +424,10 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public async void PreviewSource()
         {
-            await PreviewSourceAsync().ConfigureAwait(false);
+            await PreviewSourceInternalAsync(forceSplitView: false).ConfigureAwait(false);
         }
 
-        private async Task PreviewSourceAsync()
+        private async Task PreviewSourceInternalAsync(bool forceSplitView)
         {
             var node = SelectedNode;
             if (node is null)
@@ -406,6 +454,11 @@ namespace Avalonia.Diagnostics.ViewModels
                     {
                         preview.RuntimeComparison = runtimePreview;
                     }
+
+                    if (forceSplitView && preview.RuntimeComparison is not null)
+                    {
+                        preview.IsSplitViewEnabled = true;
+                    }
                     SourcePreviewRequested?.Invoke(this, preview);
                 });
             }
@@ -413,6 +466,16 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 // Preview is best-effort.
             }
+        }
+
+        private async Task EditTemplateAsync()
+        {
+            if (!CanEditTemplate)
+            {
+                return;
+            }
+
+            await PreviewSourceInternalAsync(forceSplitView: true).ConfigureAwait(false);
         }
 
         private async Task DeleteNodeAsync()
@@ -434,6 +497,8 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 return;
             }
+
+            RemoveFromMultiSelection(runtimeNode);
 
             var parentDescriptor = FindParentDescriptor(selection);
             if (parentDescriptor is null)
@@ -619,6 +684,221 @@ namespace Avalonia.Diagnostics.ViewModels
             };
         }
 
+        internal async Task<(IReadOnlyList<PropertyChangeContext> Contexts, IReadOnlyList<object?> PreviousValues, IReadOnlyList<TreeNode> Nodes)> BuildAdditionalMutationContextsAsync(AvaloniaProperty property)
+        {
+            if (property is null)
+            {
+                throw new ArgumentNullException(nameof(property));
+            }
+
+            if (_multiSelection.Count == 0)
+            {
+                return (Array.Empty<PropertyChangeContext>(), Array.Empty<object?>(), Array.Empty<TreeNode>());
+            }
+
+            var contexts = new List<PropertyChangeContext>(_multiSelection.Count);
+            var previousValues = new List<object?>(_multiSelection.Count);
+            var nodes = new List<TreeNode>(_multiSelection.Count);
+
+            var primaryDocumentPath = SelectedNodeXaml?.Document?.Path;
+
+            foreach (var candidate in _multiSelection)
+            {
+                if (SelectedNode is not null && ReferenceEquals(candidate, SelectedNode))
+                {
+                    continue;
+                }
+
+                var sourceInfo = await EnsureSourceInfoAsync(candidate).ConfigureAwait(false);
+                var selection = await BuildXamlSelectionAsync(candidate, sourceInfo).ConfigureAwait(false);
+
+                if (selection?.Document is null || selection.Node is null)
+                {
+                    continue;
+                }
+
+                if (primaryDocumentPath is not null && !PathsEqual(primaryDocumentPath, selection.Document.Path))
+                {
+                    continue;
+                }
+
+                var context = new PropertyChangeContext(
+                    candidate.Visual,
+                    property,
+                    selection.Document,
+                    selection.Node,
+                    frame: "LocalValue",
+                    valueSource: "LocalValue");
+
+                contexts.Add(context);
+                previousValues.Add(candidate.Visual.GetValue(property));
+                nodes.Add(candidate);
+            }
+
+            if (contexts.Count == 0)
+            {
+                return (Array.Empty<PropertyChangeContext>(), Array.Empty<object?>(), Array.Empty<TreeNode>());
+            }
+
+            return (contexts, previousValues, nodes);
+        }
+
+        internal async Task<string?> TryGetSelectedSubtreeXamlAsync()
+        {
+            var node = SelectedNode;
+            if (node is null)
+            {
+                return null;
+            }
+
+            var selection = SelectedNodeXaml;
+            if (selection?.Document is null || selection.Node is null)
+            {
+                var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                selection = await BuildXamlSelectionAsync(node, info).ConfigureAwait(false);
+                if (selection is null)
+                {
+                    return null;
+                }
+
+                SelectedNodeXaml = selection;
+            }
+
+            if (selection.Document is null || selection.Node is null)
+            {
+                return null;
+            }
+
+            return selection.Document.Text.Substring(selection.Node.Span.Start, selection.Node.Span.Length);
+        }
+
+        internal async Task<bool> PasteSubtreeAsync(string? serialized, SubtreePasteMode mode)
+        {
+            if (string.IsNullOrWhiteSpace(serialized))
+            {
+                return false;
+            }
+
+            var node = SelectedNode;
+            if (node is null)
+            {
+                return false;
+            }
+
+            var selection = SelectedNodeXaml;
+            if (selection?.Document is null || selection.Node is null)
+            {
+                var info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
+                selection = await BuildXamlSelectionAsync(node, info).ConfigureAwait(false);
+                if (selection is null)
+                {
+                    return false;
+                }
+
+                SelectedNodeXaml = selection;
+            }
+
+            if (selection.Document is null || selection.Node is null)
+            {
+                return false;
+            }
+
+            var document = selection.Document;
+            var descriptor = selection.Node;
+            var documentPath = document.Path;
+            if (string.IsNullOrWhiteSpace(documentPath))
+            {
+                return false;
+            }
+
+            var index = await _xamlAstWorkspace.GetIndexAsync(documentPath).ConfigureAwait(false);
+            var insertionTarget = mode == SubtreePasteMode.Child ? descriptor : FindParentDescriptor(selection);
+            if (insertionTarget is null)
+            {
+                return false;
+            }
+
+            var operationTarget = insertionTarget;
+            var insertionIndex = mode == SubtreePasteMode.Child
+                ? CountChildElements(index, descriptor)
+                : DetermineSiblingInsertionIndex(descriptor);
+
+            if (insertionIndex < 0)
+            {
+                return false;
+            }
+
+            var guardTarget = mode == SubtreePasteMode.Child ? descriptor : insertionTarget;
+            var spanHash = XamlGuardUtilities.ComputeNodeHash(document, guardTarget);
+
+            var payload = new ChangePayload
+            {
+                Serialized = serialized,
+                InsertionIndex = insertionIndex,
+                SurroundingWhitespace = DetermineLineEnding(document.Text)
+            };
+
+            var operation = new ChangeOperation
+            {
+                Id = "op-1",
+                Type = ChangeOperationTypes.UpsertElement,
+                Target = new ChangeTarget
+                {
+                    DescriptorId = operationTarget.Id.ToString(),
+                    Path = operationTarget.LocalName,
+                    NodeType = "Element"
+                },
+                Payload = payload,
+                Guard = new ChangeOperationGuard
+                {
+                    SpanHash = spanHash,
+                    ParentSpanHash = mode == SubtreePasteMode.Sibling ? XamlGuardUtilities.ComputeNodeHash(document, insertionTarget) : null
+                }
+            };
+
+            var elementId = BuildRuntimeElementId(node.Visual);
+
+            var envelope = new ChangeEnvelope
+            {
+                BatchId = Guid.NewGuid(),
+                InitiatedAt = DateTimeOffset.UtcNow,
+                Source = new ChangeSourceInfo
+                {
+                    Inspector = TreeInspectorName,
+                    Gesture = mode == SubtreePasteMode.Child ? "PasteSubtreeChild" : "PasteSubtreeSibling"
+                },
+                Document = new ChangeDocumentInfo
+                {
+                    Path = document.Path,
+                    Encoding = DefaultEncoding,
+                    Version = document.Version.ToString(),
+                    Mode = DocumentModeWritable
+                },
+                Context = new ChangeContextInfo
+                {
+                    ElementId = elementId,
+                    AstNodeId = descriptor.Id.ToString(),
+                    Property = TreeContextProperty,
+                    Frame = TreeContextFrame,
+                    ValueSource = TreeContextValueSource
+                },
+                Guards = new ChangeGuardsInfo
+                {
+                    DocumentVersion = document.Version.ToString(),
+                    RuntimeFingerprint = elementId
+                },
+                Changes = new[] { operation }
+            };
+
+            if (_changeEmitter?.MutationDispatcher is not { } dispatcher)
+            {
+                return false;
+            }
+
+            var result = await dispatcher.DispatchAsync(envelope).ConfigureAwait(false);
+            return result.Status == ChangeDispatchStatus.Success;
+        }
+
         private static string BuildRuntimeElementId(AvaloniaObject? element)
         {
             if (element is null)
@@ -627,6 +907,69 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return $"runtime://avalonia-object/{RuntimeHelpers.GetHashCode(element)}";
+        }
+
+        private static int CountChildElements(IXamlAstIndex index, XamlAstNodeDescriptor parent)
+        {
+            var parentPath = parent.Path;
+            var expectedDepth = parentPath.Count + 1;
+            var count = 0;
+
+            foreach (var node in index.Nodes)
+            {
+                if (node.Path.Count == expectedDepth && PathStartsWith(node.Path, parentPath))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static bool PathStartsWith(IReadOnlyList<int> path, IReadOnlyList<int> prefix)
+        {
+            if (path.Count < prefix.Count)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < prefix.Count; index++)
+            {
+                if (path[index] != prefix[index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int DetermineSiblingInsertionIndex(XamlAstNodeDescriptor descriptor)
+        {
+            var path = descriptor.Path;
+            if (path.Count == 0)
+            {
+                return 0;
+            }
+
+            var currentIndex = path[path.Count - 1];
+            return currentIndex + 1;
+        }
+
+        private static string DetermineLineEnding(string text)
+        {
+            var index = text.IndexOf('\n');
+            if (index < 0)
+            {
+                return Environment.NewLine;
+            }
+
+            if (index > 0 && text[index - 1] == '\r')
+            {
+                return "\r\n";
+            }
+
+            return "\n";
         }
 
         private static string? CreateRuntimeSnapshotSnippet(TreeNode node, ControlDetailsViewModel details)
@@ -951,6 +1294,72 @@ namespace Avalonia.Diagnostics.ViewModels
                 var selector = string.Join(" /template/ ", parts);
 
                 ClipboardCopyRequested?.Invoke(this, selector);
+            }
+        }
+
+        private void AddSelectedNodeToMultiSelection()
+        {
+            if (SelectedNode is null)
+            {
+                return;
+            }
+
+            AddToMultiSelection(SelectedNode);
+        }
+
+        private void RemoveSelectedNodeFromMultiSelection()
+        {
+            if (SelectedNode is null)
+            {
+                return;
+            }
+
+            RemoveFromMultiSelection(SelectedNode);
+        }
+
+        public void ClearMultiSelection()
+        {
+            if (_multiSelection.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var node in _multiSelection)
+            {
+                node.IsMultiSelected = false;
+            }
+
+            _multiSelection.Clear();
+            RaisePropertyChanged(nameof(HasMultiSelection));
+            RaisePropertyChanged(nameof(CanAddToMultiSelection));
+            RaisePropertyChanged(nameof(CanRemoveFromMultiSelection));
+            UpdateCommandStates();
+        }
+
+        private void AddToMultiSelection(TreeNode node)
+        {
+            if (_multiSelection.Contains(node))
+            {
+                return;
+            }
+
+            _multiSelection.Add(node);
+            node.IsMultiSelected = true;
+            RaisePropertyChanged(nameof(HasMultiSelection));
+            RaisePropertyChanged(nameof(CanAddToMultiSelection));
+            RaisePropertyChanged(nameof(CanRemoveFromMultiSelection));
+            UpdateCommandStates();
+        }
+
+        private void RemoveFromMultiSelection(TreeNode node)
+        {
+            if (_multiSelection.Remove(node))
+            {
+                node.IsMultiSelected = false;
+                RaisePropertyChanged(nameof(HasMultiSelection));
+                RaisePropertyChanged(nameof(CanAddToMultiSelection));
+                RaisePropertyChanged(nameof(CanRemoveFromMultiSelection));
+                UpdateCommandStates();
             }
         }
 
@@ -1612,6 +2021,10 @@ namespace Avalonia.Diagnostics.ViewModels
             _previewSourceCommand.RaiseCanExecuteChanged();
             _navigateToSourceCommand.RaiseCanExecuteChanged();
             _deleteNodeCommand.RaiseCanExecuteChanged();
+            _addToMultiSelectionCommand.RaiseCanExecuteChanged();
+            _removeFromMultiSelectionCommand.RaiseCanExecuteChanged();
+            _clearMultiSelectionCommand.RaiseCanExecuteChanged();
+            _editTemplateCommand.RaiseCanExecuteChanged();
         }
 
         internal void RestoreScope(TreeNode? scoped)
