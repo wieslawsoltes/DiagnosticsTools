@@ -318,7 +318,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             try
             {
-                var content = AstSelection?.Document?.Text ?? await FetchContentAsync().ConfigureAwait(false);
+                var content = AstSelection?.Document?.Text ?? await FetchContentAsync();
                 if (content is null)
                 {
                     ErrorMessage = "Source content is unavailable." +
@@ -340,7 +340,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public async Task OpenSourceAsync()
         {
-            await _sourceNavigator.NavigateAsync(SourceInfo).ConfigureAwait(false);
+            await _sourceNavigator.NavigateAsync(SourceInfo);
         }
 
         public void NavigateToAst()
@@ -560,7 +560,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             async Task RefreshAsync()
             {
-                var snapshot = await BuildSelectionSnapshotAsync(e).ConfigureAwait(false);
+                var snapshot = await BuildSelectionSnapshotAsync(e);
                 if (snapshot is null)
                 {
                     return;
@@ -607,8 +607,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
             try
             {
-                var document = await _xamlAstWorkspace.GetDocumentAsync(_normalizedDocumentPath!).ConfigureAwait(false);
-                var index = await _xamlAstWorkspace.GetIndexAsync(_normalizedDocumentPath!).ConfigureAwait(false);
+                var document = await _xamlAstWorkspace.GetDocumentAsync(_normalizedDocumentPath!);
+                var index = await _xamlAstWorkspace.GetIndexAsync(_normalizedDocumentPath!);
                 var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
 
                 XamlAstNodeDescriptor? node = null;
@@ -735,7 +735,7 @@ namespace Avalonia.Diagnostics.ViewModels
             AstSelection = null;
             Snippet = null;
             ErrorMessage = null;
-            await LoadAsync().ConfigureAwait(false);
+            await LoadAsync();
         }
 
         private void SetErrorMessage(string? message)

@@ -365,8 +365,34 @@ namespace Avalonia.Diagnostics.Controls
                             invalidate = true;
                         }
 
-                        _textEditor.ScrollTo(startLine, 0);
-                        _textEditor.TextArea.Caret.Position = new TextViewPosition(startLine, 0);
+                        var caretLine = startLine;
+                        var caretColumn = 1;
+                        var caretOffset = 0;
+
+                        if (TryGetSpanAnchor(document, highlightSpanStart, out var spanOffset, out var spanLocation))
+                        {
+                            caretOffset = spanOffset;
+                            caretLine = spanLocation.Line;
+                            caretColumn = Math.Max(1, spanLocation.Column);
+                        }
+                        else if (document.LineCount >= startLine)
+                        {
+                            var line = document.GetLineByNumber(startLine);
+                            var lineText = document.GetText(line.Offset, line.Length);
+                            var firstContent = lineText.TakeWhile(char.IsWhiteSpace).Count() + 1;
+                            caretColumn = Math.Min(firstContent, lineText.Length + 1);
+                            caretOffset = document.GetOffset(new TextLocation(caretLine, caretColumn));
+                        }
+                        else
+                        {
+                            var fallbackOffset = highlightSpanStart.HasValue
+                                ? Math.Max(0, Math.Min(highlightSpanStart.Value, document.TextLength))
+                                : 0;
+                            caretOffset = fallbackOffset;
+                        }
+
+                        _textEditor.ScrollTo(caretLine, caretColumn);
+                        _textEditor.TextArea.Caret.Offset = Math.Min(caretOffset, document.TextLength);
                     }
                 }
 
@@ -426,6 +452,37 @@ namespace Avalonia.Diagnostics.Controls
             {
                 _suppressSelectionSync = false;
             }
+        }
+
+        private static bool TryGetSpanAnchor(TextDocument? document, int? highlightSpanStart, out int offset, out TextLocation location)
+        {
+            offset = 0;
+            location = default;
+            if (document is null || highlightSpanStart is null)
+            {
+                return false;
+            }
+
+            var startOffset = Math.Max(0, highlightSpanStart.Value);
+            if (document.TextLength == 0)
+            {
+                return false;
+            }
+
+            int locationOffset;
+            if (startOffset >= document.TextLength)
+            {
+                locationOffset = Math.Max(0, document.TextLength - 1);
+            }
+            else
+            {
+                locationOffset = startOffset;
+            }
+
+            location = document.GetLocation(locationOffset);
+            offset = Math.Min(startOffset, document.TextLength);
+
+            return true;
         }
 
         private void OnCaretPositionChanged(object? sender, EventArgs e)
@@ -1041,46 +1098,88 @@ namespace Avalonia.Diagnostics.Controls
 
             public NavigationAttributes(bool isClickable, bool showUnderline, Cursor? cursor, object? context, IReadOnlyList<SourcePreviewNavigationTarget>? targets)
             {
-            IsClickable = isClickable;
-            ShowUnderline = showUnderline;
-            Cursor = cursor;
-            Context = context;
-            _targets = targets;
-        }
+                IsClickable = isClickable;
+                ShowUnderline = showUnderline;
+                Cursor = cursor;
+                Context = context;
+                _targets = targets;
+            }
 
-        public bool IsClickable { get; }
+            public bool IsClickable { get; }
 
-        public bool ShowUnderline { get; }
+            public bool ShowUnderline { get; }
 
-        public Cursor? Cursor { get; }
+            public Cursor? Cursor { get; }
 
-        public object? Context { get; }
+            public object? Context { get; }
 
-        public IReadOnlyList<SourcePreviewNavigationTarget> Targets => _targets ?? Array.Empty<SourcePreviewNavigationTarget>();
+            public IReadOnlyList<SourcePreviewNavigationTarget> Targets => _targets ?? Array.Empty<SourcePreviewNavigationTarget>();
 
-        public bool Equals(NavigationAttributes other) =>
-            IsClickable == other.IsClickable &&
-            ShowUnderline == other.ShowUnderline &&
-            Equals(Cursor, other.Cursor) &&
-            Equals(Context, other.Context) &&
-            ReferenceEquals(_targets, other._targets);
+            public bool Equals(NavigationAttributes other) =>
+                IsClickable == other.IsClickable &&
+                ShowUnderline == other.ShowUnderline &&
+                Equals(Cursor, other.Cursor) &&
+                Equals(Context, other.Context) &&
+                TargetsEqual(_targets, other._targets);
 
-        public override bool Equals(object? obj) => obj is NavigationAttributes other && Equals(other);
+            public override bool Equals(object? obj) => obj is NavigationAttributes other && Equals(other);
 
-        public override int GetHashCode()
-        {
-            unchecked
+            public override int GetHashCode()
             {
-                var hash = 17;
-                hash = (hash * 31) + IsClickable.GetHashCode();
-                hash = (hash * 31) + ShowUnderline.GetHashCode();
-                hash = (hash * 31) + (Cursor?.GetHashCode() ?? 0);
-                hash = (hash * 31) + (Context?.GetHashCode() ?? 0);
-                hash = (hash * 31) + (_targets?.GetHashCode() ?? 0);
-                return hash;
+                unchecked
+                {
+                    var hash = 17;
+                    hash = (hash * 31) + IsClickable.GetHashCode();
+                    hash = (hash * 31) + ShowUnderline.GetHashCode();
+                    hash = (hash * 31) + (Cursor?.GetHashCode() ?? 0);
+                    hash = (hash * 31) + (Context?.GetHashCode() ?? 0);
+                    hash = (hash * 31) + GetTargetsHashCode(_targets);
+                    return hash;
+                }
+            }
+
+            private static bool TargetsEqual(IReadOnlyList<SourcePreviewNavigationTarget>? left, IReadOnlyList<SourcePreviewNavigationTarget>? right)
+            {
+                if (ReferenceEquals(left, right))
+                {
+                    return true;
+                }
+
+                if (left is null || right is null || left.Count != right.Count)
+                {
+                    return false;
+                }
+
+                for (var index = 0; index < left.Count; index++)
+                {
+                    if (!ReferenceEquals(left[index], right[index]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            private static int GetTargetsHashCode(IReadOnlyList<SourcePreviewNavigationTarget>? targets)
+            {
+                if (targets is null || targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                unchecked
+                {
+                    var hash = 17;
+                    for (var index = 0; index < targets.Count; index++)
+                    {
+                        hash = (hash * 31) + (targets[index]?.GetHashCode() ?? 0);
+                    }
+
+                    return hash;
+                }
             }
         }
-    }
     }
 
 public sealed class SourcePreviewNavigationOptions

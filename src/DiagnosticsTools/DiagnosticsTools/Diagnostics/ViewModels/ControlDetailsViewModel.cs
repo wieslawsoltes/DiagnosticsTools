@@ -947,10 +947,10 @@ namespace Avalonia.Diagnostics.ViewModels
             var sourceInfo = new SourceInfo(
                 document.Path,
                 null,
-                descriptor.LineSpan.Start.Line + 1,
-                descriptor.LineSpan.Start.Column + 1,
-                descriptor.LineSpan.End.Line + 1,
-                descriptor.LineSpan.End.Column + 1,
+                descriptor.LineSpan.Start.Line,
+                descriptor.LineSpan.Start.Column,
+                descriptor.LineSpan.End.Line,
+                descriptor.LineSpan.End.Column,
                 SourceOrigin.Local);
 
             await Dispatcher.UIThread.InvokeAsync(() =>
