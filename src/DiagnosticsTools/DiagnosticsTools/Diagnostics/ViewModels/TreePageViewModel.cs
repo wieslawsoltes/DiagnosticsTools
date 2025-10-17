@@ -15,6 +15,7 @@ using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Logging;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -1804,6 +1805,11 @@ namespace Avalonia.Diagnostics.ViewModels
                 var document = await _xamlAstWorkspace.GetDocumentAsync(path!).ConfigureAwait(false);
                 var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
                 var descriptor = ResolveDescriptor(index, node, info);
+                if (descriptor is null)
+                {
+                    var documentPath = document.Path ?? info?.LocalPath ?? "<unknown>";
+                    LogDescriptorResolutionFailure(node, documentPath);
+                }
                 var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
                 return new XamlAstSelection(document, descriptor, descriptors);
             }
@@ -1832,50 +1838,305 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private XamlAstNodeDescriptor? ResolveDescriptor(IXamlAstIndex index, TreeNode node, SourceInfo? info)
         {
-            XamlAstNodeDescriptor? descriptor = null;
-
-            if (info?.StartLine is int startLine && startLine > 0)
+            var nameCandidates = GetCandidatesByName(index, node);
+            var descriptor = TryResolveWithStructuralHints(nameCandidates, node, info);
+            if (descriptor is not null)
             {
-                descriptor = index.Nodes
-                    .Where(d =>
-                    {
-                        var begin = GetLineStart(d);
-                        var end = GetLineEnd(d);
-                        return startLine >= begin && startLine <= end;
-                    })
-                    .OrderBy(d => GetLineEnd(d) - GetLineStart(d))
-                    .ThenBy(d => d.Path.Count)
-                    .FirstOrDefault();
-
-                if (descriptor is not null)
-                {
-                    return descriptor;
-                }
+                return descriptor;
             }
 
+            var lineCandidates = GetCandidatesByLine(index, info);
+            descriptor = TryResolveWithStructuralHints(lineCandidates, node, info);
+            if (descriptor is not null)
+            {
+                return descriptor;
+            }
+
+            var allCandidates = index.Nodes.ToList();
+            return TryResolveWithStructuralHints(allCandidates, node, info);
+        }
+
+        private static IReadOnlyList<XamlAstNodeDescriptor> GetCandidatesByName(IXamlAstIndex index, TreeNode node)
+        {
             var elementName = node.ElementName ?? (node.Visual as INamed)?.Name;
             if (!string.IsNullOrWhiteSpace(elementName))
             {
                 var matches = index.FindByName(elementName!);
-                if (matches.Count == 1)
+                if (matches.Count > 0)
                 {
-                    return matches[0];
-                }
-
-                if (matches.Count > 1)
-                {
-                    var typeName = node.Visual?.GetType().Name ?? node.Type;
-                    descriptor = matches.FirstOrDefault(m => string.Equals(m.LocalName, typeName, StringComparison.Ordinal));
-                    if (descriptor is not null)
-                    {
-                        return descriptor;
-                    }
+                    return matches.ToList();
                 }
             }
 
-            var fallbackType = node.Visual?.GetType().Name ?? node.Type;
-            descriptor = index.Nodes.FirstOrDefault(m => string.Equals(m.LocalName, fallbackType, StringComparison.Ordinal));
-            return descriptor;
+            return Array.Empty<XamlAstNodeDescriptor>();
+        }
+
+        private static IReadOnlyList<XamlAstNodeDescriptor> GetCandidatesByLine(IXamlAstIndex index, SourceInfo? info)
+        {
+            if (info?.StartLine is not int startLine || startLine <= 0)
+            {
+                return Array.Empty<XamlAstNodeDescriptor>();
+            }
+
+            return index.Nodes
+                .Where(d => startLine >= GetLineStart(d) && startLine <= GetLineEnd(d))
+                .OrderBy(d => GetLineEnd(d) - GetLineStart(d))
+                .ThenBy(d => d.Path.Count)
+                .ToList();
+        }
+
+        private XamlAstNodeDescriptor? TryResolveWithStructuralHints(
+            IReadOnlyList<XamlAstNodeDescriptor> candidates,
+            TreeNode node,
+            SourceInfo? info)
+        {
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            var filtered = ApplyTemplateRoleFilter(node, candidates);
+            filtered = ApplyParentPathFilter(node, filtered, out var parentDescriptor);
+            filtered = ApplyDepthFilter(node, filtered);
+            filtered = ApplyOrdinalFilter(node, filtered, parentDescriptor);
+
+            if (filtered.Count == 1)
+            {
+                return filtered[0];
+            }
+
+            return SelectBestCandidate(filtered, node, info);
+        }
+
+        private static IReadOnlyList<XamlAstNodeDescriptor> ApplyTemplateRoleFilter(TreeNode node, IReadOnlyList<XamlAstNodeDescriptor> candidates)
+        {
+            if (candidates.Count == 0)
+            {
+                return candidates;
+            }
+
+            var isTemplateNode = IsTemplateNode(node);
+            var filtered = candidates.Where(d => d.IsTemplate == isTemplateNode).ToList();
+            return filtered.Count > 0 ? filtered : candidates;
+        }
+
+        private IReadOnlyList<XamlAstNodeDescriptor> ApplyParentPathFilter(
+            TreeNode node,
+            IReadOnlyList<XamlAstNodeDescriptor> candidates,
+            out XamlAstNodeDescriptor? parentDescriptor)
+        {
+            parentDescriptor = GetClosestDescriptorAncestor(node);
+            if (candidates.Count == 0 || parentDescriptor is null)
+            {
+                return candidates;
+            }
+
+            var parentPath = parentDescriptor.Path;
+            var filtered = new List<XamlAstNodeDescriptor>();
+
+            foreach (var candidate in candidates)
+            {
+                if (candidate.Path.Count == parentPath.Count + 1 && HasPathPrefix(candidate.Path, parentPath))
+                {
+                    filtered.Add(candidate);
+                }
+            }
+
+            return filtered.Count > 0 ? filtered : candidates;
+        }
+
+        private IReadOnlyList<XamlAstNodeDescriptor> ApplyDepthFilter(TreeNode node, IReadOnlyList<XamlAstNodeDescriptor> candidates)
+        {
+            if (candidates.Count == 0)
+            {
+                return candidates;
+            }
+
+            var depth = GetStructuralDepth(node);
+            if (depth <= 0)
+            {
+                return candidates;
+            }
+
+            var filtered = candidates.Where(d => d.Path.Count == depth).ToList();
+            return filtered.Count > 0 ? filtered : candidates;
+        }
+
+        private IReadOnlyList<XamlAstNodeDescriptor> ApplyOrdinalFilter(
+            TreeNode node,
+            IReadOnlyList<XamlAstNodeDescriptor> candidates,
+            XamlAstNodeDescriptor? parentDescriptor)
+        {
+            if (candidates.Count <= 1 || parentDescriptor is null)
+            {
+                return candidates;
+            }
+
+            if (GetStructuralIndex(node) is not int ordinal)
+            {
+                return candidates;
+            }
+
+            var parentPath = parentDescriptor.Path;
+            var filtered = candidates
+                .Where(d => d.Path.Count == parentPath.Count + 1 && d.Path[d.Path.Count - 1] == ordinal)
+                .ToList();
+
+            return filtered.Count > 0 ? filtered : candidates;
+        }
+
+        private static bool HasPathPrefix(IReadOnlyList<int> path, IReadOnlyList<int> prefix)
+        {
+            if (prefix.Count > path.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < prefix.Count; i++)
+            {
+                if (path[i] != prefix[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private XamlAstNodeDescriptor? SelectBestCandidate(
+            IReadOnlyList<XamlAstNodeDescriptor> candidates,
+            TreeNode node,
+            SourceInfo? info)
+        {
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            var typeName = node.Visual?.GetType().Name ?? node.Type;
+            var startLine = info?.StartLine;
+
+            return candidates
+                .OrderBy(d => string.Equals(d.LocalName, typeName, StringComparison.Ordinal) ? 0 : 1)
+                .ThenBy(d => startLine is int line ? Math.Abs(line - GetLineStart(d)) : 0)
+                .ThenBy(d => d.Path.Count)
+                .ThenBy(d => d.Span.Length)
+                .First();
+        }
+
+        private static bool IsTemplateNode(TreeNode node) =>
+            node switch
+            {
+                CombinedTreeNode { Role: CombinedTreeNode.CombinedNodeRole.Template } => true,
+                _ => node.IsInTemplate
+            };
+
+        private static XamlAstNodeDescriptor? GetClosestDescriptorAncestor(TreeNode node)
+        {
+            var current = node.Parent;
+            while (current is not null)
+            {
+                if (!MapsToXamlElement(current))
+                {
+                    current = current.Parent;
+                    continue;
+                }
+
+                if (current.XamlDescriptor is not null)
+                {
+                    return current.XamlDescriptor;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static int GetStructuralDepth(TreeNode node)
+        {
+            var depth = 0;
+            var current = node;
+
+            while (current is not null)
+            {
+                if (MapsToXamlElement(current))
+                {
+                    depth++;
+                }
+
+                current = GetStructuralParent(current);
+            }
+
+            return depth;
+        }
+
+        private static int? GetStructuralIndex(TreeNode node)
+        {
+            var parent = GetStructuralParent(node);
+            if (parent is null)
+            {
+                return null;
+            }
+
+            var ordinal = 0;
+            var children = parent.Children;
+
+            for (var i = 0; i < children.Count; i++)
+            {
+                var sibling = children[i];
+                if (!MapsToXamlElement(sibling))
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(sibling, node))
+                {
+                    return ordinal;
+                }
+
+                ordinal++;
+            }
+
+            return null;
+        }
+
+        private static TreeNode? GetStructuralParent(TreeNode node)
+        {
+            var parent = node.Parent;
+            while (parent is not null && !MapsToXamlElement(parent))
+            {
+                parent = parent.Parent;
+            }
+
+            return parent;
+        }
+
+        private static bool MapsToXamlElement(TreeNode node) => node is not CombinedTreeTemplateGroupNode;
+
+        private void LogDescriptorResolutionFailure(TreeNode node, string path)
+        {
+            if (Logger.TryGet(LogEventLevel.Warning, nameof(TreePageViewModel)) is not { } logger)
+            {
+                return;
+            }
+
+            var typeName = node.Visual?.GetType().Name ?? node.Type;
+            var name = node.ElementName ?? (node.Visual as INamed)?.Name ?? string.Empty;
+            var role = node switch
+            {
+                CombinedTreeNode combined => combined.Role.ToString(),
+                _ when node.IsInTemplate => "Template",
+                _ => "Visual"
+            };
+
+            logger.Log(
+                this,
+                "Unable to resolve XAML descriptor for {Type} (name: {Name}, role: {Role}) in document {Path}.",
+                typeName,
+                string.IsNullOrEmpty(name) ? "<unnamed>" : name,
+                role,
+                string.IsNullOrWhiteSpace(path) ? "<unknown>" : path);
         }
 
         private static XamlAstNodeDescriptor? FindParentDescriptor(XamlAstSelection selection)

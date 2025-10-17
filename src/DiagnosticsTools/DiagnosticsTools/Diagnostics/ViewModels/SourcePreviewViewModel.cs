@@ -464,9 +464,28 @@ namespace Avalonia.Diagnostics.ViewModels
 
             var currentDocument = AstSelection?.Document;
             var newDocument = selection.Document;
-            var documentMatches = currentDocument is not null &&
-                                  newDocument is not null &&
-                                  DocumentPathsEqual(currentDocument.Path, newDocument.Path);
+            var requiresReload = false;
+
+            if (!_hasManualSnippet)
+            {
+                if (!HasSnippet)
+                {
+                    requiresReload = true;
+                }
+                else if (!ReferenceEquals(currentDocument, newDocument))
+                {
+                    if (currentDocument is null || newDocument is null)
+                    {
+                        requiresReload = true;
+                    }
+                    else
+                    {
+                        var pathMatches = DocumentPathsEqual(currentDocument.Path, newDocument.Path);
+                        var versionMatches = EqualityComparer<XamlDocumentVersion>.Default.Equals(currentDocument.Version, newDocument.Version);
+                        requiresReload = !pathMatches || !versionMatches;
+                    }
+                }
+            }
 
             _isApplyingTreeSelection = true;
             try
@@ -474,7 +493,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 AstSelection = selection;
                 ApplyHighlightForCurrentSelection();
 
-                if (!HasSnippet || !documentMatches)
+                if (requiresReload)
                 {
                     _hasManualSnippet = false;
                     Snippet = null;
@@ -517,6 +536,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             ApplyHighlightForCurrentSelection();
             RefreshNavigationState();
+            _synchronizeSelection?.Invoke(AstSelection);
         }
 
         private void SubscribeToWorkspace()
