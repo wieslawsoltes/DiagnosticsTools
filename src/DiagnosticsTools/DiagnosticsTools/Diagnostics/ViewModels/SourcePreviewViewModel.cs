@@ -517,8 +517,6 @@ namespace Avalonia.Diagnostics.ViewModels
 
             ApplyHighlightForCurrentSelection();
             RefreshNavigationState();
-
-            _synchronizeSelection?.Invoke(AstSelection);
         }
 
         private void SubscribeToWorkspace()

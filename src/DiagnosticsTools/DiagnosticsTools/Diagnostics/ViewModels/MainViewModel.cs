@@ -18,6 +18,8 @@ using Avalonia.Diagnostics.ViewModels.Metrics;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Diagnostics.Runtime;
 using Microsoft.CodeAnalysis;
+using Avalonia.Diagnostics;
+using Avalonia.VisualTree;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -135,6 +137,17 @@ namespace Avalonia.Diagnostics.ViewModels
                         {
                             if (e is Input.Raw.RawPointerEventArgs pointerEventArgs)
                             {
+                                if (pointerEventArgs.Root is Visual visualRoot)
+                                {
+                                    var topLevel = TopLevel.GetTopLevel(visualRoot);
+                                    if (topLevel is not null && DevTools.IsDevToolsWindow(topLevel))
+                                    {
+                                        PointerOverRoot = null;
+                                        PointerOverElement = null;
+                                        return;
+                                    }
+                                }
+
                                 PointerOverRoot = pointerEventArgs.Root;
                                 PointerOverElement = pointerEventArgs.Root.InputHitTest(pointerEventArgs.Position);
                             }

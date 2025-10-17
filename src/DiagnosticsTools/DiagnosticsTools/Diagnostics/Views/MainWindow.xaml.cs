@@ -15,6 +15,7 @@ using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.VisualTree;
 using Avalonia.Reactive;
+using Avalonia.Diagnostics;
 
 namespace Avalonia.Diagnostics.Views
 {
@@ -44,7 +45,17 @@ namespace Avalonia.Diagnostics.Views
                 {
                     if (x is RawPointerEventArgs pointerEventArgs)
                     {
-                        _lastPointerPosition = ((Visual)x.Root).PointToScreen(pointerEventArgs.Position);
+                        if (pointerEventArgs.Root is Visual visualRoot)
+                        {
+                            var topLevel = TopLevel.GetTopLevel(visualRoot);
+                            if (topLevel is not null && DevTools.IsDevToolsWindow(topLevel))
+                            {
+                                _lastPointerPosition = default;
+                                return;
+                            }
+
+                            _lastPointerPosition = visualRoot.PointToScreen(pointerEventArgs.Position);
+                        }
                     }
                     else if (x is RawKeyEventArgs keyEventArgs && keyEventArgs.Type == RawKeyEventType.KeyDown)
                     {

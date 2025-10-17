@@ -161,7 +161,7 @@ public class SourcePreviewViewModelTests
     }
 
     [Fact]
-    public void NotifyEditorSelectionChanged_PropagatesToSynchronizer()
+    public void NotifyEditorSelectionChanged_UpdatesSelectionWithoutTreeSync()
     {
         var (document, index) = CreateDocument();
         var gridDescriptor = index.Nodes.First(node => node.LocalName == "Grid");
@@ -179,8 +179,8 @@ public class SourcePreviewViewModelTests
 
         viewModel.NotifyEditorSelectionChanged(buttonDescriptor);
 
-        Assert.Same(buttonDescriptor, forwarded?.Node);
         Assert.Same(buttonDescriptor, viewModel.AstSelection?.Node);
+        Assert.Null(forwarded);
     }
 
     [Fact]

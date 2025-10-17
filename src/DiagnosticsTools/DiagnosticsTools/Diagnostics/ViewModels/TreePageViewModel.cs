@@ -45,6 +45,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly List<WeakReference<SourcePreviewViewModel>> _previewObservers = new();
         private readonly object _previewObserversGate = new();
         private bool _suppressPreviewNavigation;
+        private int _selectedNodeRevision;
+        private int _previewNavigationRevision;
         private readonly DelegateCommand _previewSourceCommand;
         private readonly DelegateCommand _navigateToSourceCommand;
         private readonly DelegateCommand _deleteNodeCommand;
@@ -181,6 +183,10 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 if (RaiseAndSetIfChanged(ref _selectedNode, value))
                 {
+                    unchecked
+                    {
+                        _selectedNodeRevision++;
+                    }
                     Details = value != null ?
                         new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator, _runtimeCoordinator) :
                         null;
@@ -1541,39 +1547,90 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            _ = SynchronizeSelectionFromPreviewAsync(selection);
+            unchecked
+            {
+                _previewNavigationRevision++;
+            }
+
+            var navigationRevision = _previewNavigationRevision;
+            var selectedNodeRevision = _selectedNodeRevision;
+
+            _ = SynchronizeSelectionFromPreviewAsync(selection, navigationRevision, selectedNodeRevision);
         }
 
-        private async Task SynchronizeSelectionFromPreviewAsync(XamlAstSelection selection)
+        private async Task SynchronizeSelectionFromPreviewAsync(
+            XamlAstSelection selection,
+            int navigationRevision,
+            int selectedNodeRevision)
         {
+            TreeNode? target;
+            lock (_nodesByXamlId)
+            {
+                _nodesByXamlId.TryGetValue(selection.Node!.Id, out target);
+            }
+
+            if (target is null)
+            {
+                target = await FindNodeBySelectionAsync(selection).ConfigureAwait(false);
+            }
+
+            if (target is null)
+            {
+                return;
+            }
+
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => ApplySelectionFromPreview(target, selection, navigationRevision, selectedNodeRevision),
+                    DispatcherPriority.Background);
+            }
+            else
+            {
+                ApplySelectionFromPreview(target, selection, navigationRevision, selectedNodeRevision);
+            }
+        }
+
+        private void ApplySelectionFromPreview(
+            TreeNode target,
+            XamlAstSelection selection,
+            int navigationRevision,
+            int selectedNodeRevision)
+        {
+            if (!ShouldApplyPreviewSelection(navigationRevision, selectedNodeRevision, target, selection))
+            {
+                return;
+            }
+
+            _suppressPreviewNavigation = true;
             try
             {
-                _suppressPreviewNavigation = true;
+                RegisterXamlDescriptor(target, selection.Node);
 
-                TreeNode? target;
-                lock (_nodesByXamlId)
+                if (!IsNodeInScope(target))
                 {
-                    _nodesByXamlId.TryGetValue(selection.Node!.Id, out target);
+                    ShowFullTree();
                 }
 
-                if (target is null)
+                if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
                 {
-                    target = await FindNodeBySelectionAsync(selection).ConfigureAwait(false);
+                    TreeFilter.FilterString = string.Empty;
                 }
 
-                if (target is null)
-                {
-                    return;
-                }
+                ExpandNode(target.Parent);
 
-                if (!Dispatcher.UIThread.CheckAccess())
+                if (!ReferenceEquals(target, SelectedNode))
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => ApplySelectionFromPreview(target, selection), DispatcherPriority.Background);
+                    SelectedNode = target;
                 }
                 else
                 {
-                    ApplySelectionFromPreview(target, selection);
+                    _ = UpdateSelectedNodeSourceInfoAsync(target);
                 }
+
+                SelectedNodeXaml = selection;
+
+                Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
             }
             finally
             {
@@ -1581,34 +1638,40 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
-        private void ApplySelectionFromPreview(TreeNode target, XamlAstSelection selection)
+        private bool ShouldApplyPreviewSelection(
+            int navigationRevision,
+            int selectedNodeRevision,
+            TreeNode target,
+            XamlAstSelection selection)
         {
-            RegisterXamlDescriptor(target, selection.Node);
-
-            if (!IsNodeInScope(target))
+            // Avoid applying stale preview navigation that was superseded or when the user
+            // changed the tree selection to a different node while the lookup was running.
+            if (navigationRevision != _previewNavigationRevision)
             {
-                ShowFullTree();
+                return false;
             }
 
-            if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+            if (selectedNodeRevision == _selectedNodeRevision)
             {
-                TreeFilter.FilterString = string.Empty;
+                return true;
             }
 
-            ExpandNode(target.Parent);
-
-            if (!ReferenceEquals(target, SelectedNode))
+            if (ReferenceEquals(SelectedNode, target))
             {
-                SelectedNode = target;
-            }
-            else
-            {
-                _ = UpdateSelectedNodeSourceInfoAsync(target);
+                return true;
             }
 
-            SelectedNodeXaml = selection;
+            var currentDescriptor = SelectedNodeXaml?.Node;
+            var selectionDescriptor = selection.Node;
 
-            Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
+            if (currentDescriptor is not null &&
+                selectionDescriptor is not null &&
+                currentDescriptor.Id == selectionDescriptor.Id)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private async Task<TreeNode?> FindNodeBySelectionAsync(XamlAstSelection selection)
