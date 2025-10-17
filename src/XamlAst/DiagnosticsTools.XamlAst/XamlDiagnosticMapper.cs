@@ -5,7 +5,7 @@ using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.Xaml
 {
-    internal static class XamlDiagnosticMapper
+    public static class XamlDiagnosticMapper
     {
         public static IReadOnlyList<XamlAstDiagnostic> CollectDiagnostics(XmlDocumentSyntax syntax)
         {

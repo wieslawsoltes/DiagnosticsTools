@@ -5,7 +5,7 @@ using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.Xaml
 {
-    internal sealed class XamlAstFoldingBuilder
+    public sealed class XamlAstFoldingBuilder
     {
         private const int MinimumFoldLength = 8;
 

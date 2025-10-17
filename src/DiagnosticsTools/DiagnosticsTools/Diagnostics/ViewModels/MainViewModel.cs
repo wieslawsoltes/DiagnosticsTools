@@ -75,7 +75,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceInfoService = sourceInfoService ?? throw new ArgumentNullException(nameof(sourceInfoService));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _roslynWorkspace = roslynWorkspace;
-            _xamlAstWorkspace = new XamlAstWorkspace();
+            _xamlAstWorkspace = new XamlAstWorkspace(XamlAstInstrumentationAdapter.Instance);
             _runtimeCoordinator = new RuntimeMutationCoordinator();
             _mutationDispatcher = new XamlMutationDispatcher(_xamlAstWorkspace, _roslynWorkspace);
             _propertyChangeEmitter = new PropertyInspectorChangeEmitter(_mutationDispatcher);

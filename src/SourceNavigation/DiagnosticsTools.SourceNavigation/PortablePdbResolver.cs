@@ -11,12 +11,12 @@ using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.SourceNavigation
 {
-    internal sealed class PortablePdbResolver : IDisposable
+    public sealed class PortablePdbResolver : IDisposable
     {
         private static readonly Guid SourceLinkGuid = new("cc110556-a091-4d38-9f06-3330a3c5c2c3");
 
         private readonly string _assemblyLocation;
-    private FileStream? _pdbStream;
+        private FileStream? _pdbStream;
         private MetadataReaderProvider? _readerProvider;
         private SourceLinkMap? _sourceLink;
         private readonly SemaphoreSlim _gate = new(1, 1);
@@ -62,7 +62,7 @@ namespace Avalonia.Diagnostics.SourceNavigation
             var sequencePoints = debug.GetSequencePoints();
 
             SequencePoint? firstPoint = null;
-            DocumentHandle documentHandle = debug.Document;
+            var documentHandle = debug.Document;
 
             foreach (var point in sequencePoints)
             {

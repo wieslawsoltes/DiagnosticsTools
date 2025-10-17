@@ -45,4 +45,9 @@
     <AvaloniaXaml Include="**\*.xaml" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" SubType="Designer" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\SourceNavigation\DiagnosticsTools.SourceNavigation\DiagnosticsTools.SourceNavigation.csproj" />
+    <ProjectReference Include="..\..\XamlAst\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj" />
+  </ItemGroup>
+
 </Project>

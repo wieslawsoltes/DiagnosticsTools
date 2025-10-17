@@ -4,7 +4,7 @@ using Avalonia.Diagnostics.SourceNavigation;
 using DiagnosticsToolsSample;
 using Xunit;
 
-namespace DiagnosticsTools.Tests
+namespace SourceNavigation.Tests
 {
     public class PortablePdbResolverTests
     {

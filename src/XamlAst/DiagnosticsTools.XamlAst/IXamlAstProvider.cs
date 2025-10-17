@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.Xaml
 {
-    internal interface IXamlAstProvider : IDisposable
+    public interface IXamlAstProvider : IDisposable
     {
         event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
         event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
@@ -17,7 +17,7 @@ namespace Avalonia.Diagnostics.Xaml
         void InvalidateAll();
     }
 
-    internal sealed class XamlDocumentChangedEventArgs : EventArgs
+    public sealed class XamlDocumentChangedEventArgs : EventArgs
     {
         public XamlDocumentChangedEventArgs(string path, XamlDocumentChangeKind kind, XamlAstDocument? document = null, Exception? error = null)
         {
@@ -36,7 +36,7 @@ namespace Avalonia.Diagnostics.Xaml
         public Exception? Error { get; }
     }
 
-    internal sealed class XamlDiagnosticsChangedEventArgs : EventArgs
+    public sealed class XamlDiagnosticsChangedEventArgs : EventArgs
     {
         public XamlDiagnosticsChangedEventArgs(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstDiagnostic> diagnostics)
         {
@@ -52,7 +52,7 @@ namespace Avalonia.Diagnostics.Xaml
         public IReadOnlyList<XamlAstDiagnostic> Diagnostics { get; }
     }
 
-    internal sealed class XamlAstNodesChangedEventArgs : EventArgs
+    public sealed class XamlAstNodesChangedEventArgs : EventArgs
     {
         public XamlAstNodesChangedEventArgs(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstNodeChange> changes)
         {
@@ -68,7 +68,7 @@ namespace Avalonia.Diagnostics.Xaml
         public IReadOnlyList<XamlAstNodeChange> Changes { get; }
     }
 
-    internal sealed class XamlAstNodeChange
+    public sealed class XamlAstNodeChange
     {
         public XamlAstNodeChange(XamlAstNodeChangeKind kind, XamlAstNodeDescriptor? oldNode, XamlAstNodeDescriptor? newNode)
         {
@@ -84,14 +84,14 @@ namespace Avalonia.Diagnostics.Xaml
         public XamlAstNodeDescriptor? NewNode { get; }
     }
 
-    internal enum XamlAstNodeChangeKind
+    public enum XamlAstNodeChangeKind
     {
         Added,
         Removed,
         Updated
     }
 
-    internal enum XamlDocumentChangeKind
+    public enum XamlDocumentChangeKind
     {
         Updated,
         Invalidated,

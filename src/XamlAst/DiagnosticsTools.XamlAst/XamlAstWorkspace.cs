@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Utilities;
 
 namespace Avalonia.Diagnostics.Xaml
@@ -12,6 +11,7 @@ namespace Avalonia.Diagnostics.Xaml
     public sealed class XamlAstWorkspace : IDisposable
     {
         private readonly IXamlAstProvider _provider;
+        private readonly IXamlAstInstrumentation _instrumentation;
         private readonly Dictionary<string, IndexCacheEntry> _indexCache;
         private readonly Dictionary<string, DiagnosticsCacheEntry> _diagnosticsCache;
         private readonly object _indexCacheGate = new();
@@ -25,21 +25,24 @@ namespace Avalonia.Diagnostics.Xaml
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
 
-        public XamlAstWorkspace()
-            : this(new XmlParserXamlAstProvider())
+        public XamlAstWorkspace(IXamlAstInstrumentation? instrumentation = null)
+            : this(
+                new XmlParserXamlAstProvider(instrumentation),
+                instrumentation)
         {
         }
 
-        internal XamlAstWorkspace(IXamlAstProvider provider)
+        public XamlAstWorkspace(IXamlAstProvider provider, IXamlAstInstrumentation? instrumentation = null)
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+            _instrumentation = instrumentation ?? NullXamlAstInstrumentation.Instance;
             _indexCache = new Dictionary<string, IndexCacheEntry>(PathComparer);
             _diagnosticsCache = new Dictionary<string, DiagnosticsCacheEntry>(PathComparer);
             _provider.DocumentChanged += HandleProviderDocumentChanged;
             _provider.NodesChanged += HandleProviderNodesChanged;
         }
 
-        internal event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged
+        public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged
         {
             add
             {
@@ -57,7 +60,7 @@ namespace Avalonia.Diagnostics.Xaml
             }
         }
 
-        internal event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged
+        public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged
         {
             add
             {
@@ -75,7 +78,7 @@ namespace Avalonia.Diagnostics.Xaml
             }
         }
 
-        internal event EventHandler<XamlDiagnosticsChangedEventArgs>? DiagnosticsChanged
+        public event EventHandler<XamlDiagnosticsChangedEventArgs>? DiagnosticsChanged
         {
             add
             {
@@ -93,13 +96,13 @@ namespace Avalonia.Diagnostics.Xaml
             }
         }
 
-        internal ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
             return _provider.GetDocumentAsync(path, cancellationToken);
         }
 
-        internal bool TryGetDiagnostics(string path, out IReadOnlyList<XamlAstDiagnostic> diagnostics)
+        public bool TryGetDiagnostics(string path, out IReadOnlyList<XamlAstDiagnostic> diagnostics)
         {
             EnsureNotDisposed();
             diagnostics = Array.Empty<XamlAstDiagnostic>();
@@ -121,7 +124,7 @@ namespace Avalonia.Diagnostics.Xaml
             return false;
         }
 
-        internal async ValueTask<IXamlAstIndex> GetIndexAsync(string path, CancellationToken cancellationToken = default)
+        public async ValueTask<IXamlAstIndex> GetIndexAsync(string path, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
             var document = await _provider.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
@@ -135,9 +138,10 @@ namespace Avalonia.Diagnostics.Xaml
                 }
             }
 
-            var buildStart = Stopwatch.GetTimestamp();
+            var stopwatch = Stopwatch.StartNew();
             var index = XamlAstIndex.Build(document);
-            MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(buildStart), "workspace", cacheHit: false);
+            stopwatch.Stop();
+            _instrumentation.RecordAstIndexBuild(stopwatch.Elapsed, "workspace", cacheHit: false);
 
             lock (_indexCacheGate)
             {
@@ -147,7 +151,7 @@ namespace Avalonia.Diagnostics.Xaml
             return index;
         }
 
-        internal void Invalidate(string path)
+        public void Invalidate(string path)
         {
             EnsureNotDisposed();
             RemoveIndexFromCache(path);
@@ -155,7 +159,7 @@ namespace Avalonia.Diagnostics.Xaml
             _provider.Invalidate(path);
         }
 
-        internal void InvalidateAll()
+        public void InvalidateAll()
         {
             EnsureNotDisposed();
             ClearIndexCache();

@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Avalonia.Diagnostics.SourceNavigation
 {
-    internal sealed class SourceLinkMap
+    public sealed class SourceLinkMap
     {
         private readonly List<Entry> _entries;
 

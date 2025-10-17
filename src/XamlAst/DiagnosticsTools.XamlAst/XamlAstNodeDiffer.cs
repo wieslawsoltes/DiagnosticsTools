@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Avalonia.Diagnostics.Xaml
 {
-    internal static class XamlAstNodeDiffer
+    public static class XamlAstNodeDiffer
     {
         public static IReadOnlyList<XamlAstNodeChange> Diff(IXamlAstIndex? oldIndex, IXamlAstIndex newIndex)
         {

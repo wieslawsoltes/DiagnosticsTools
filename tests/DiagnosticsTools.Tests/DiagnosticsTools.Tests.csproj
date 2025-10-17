@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/DiagnosticsTools/DiagnosticsTools/DiagnosticsTools.csproj" />
+    <ProjectReference Include="../../src/SourceNavigation/DiagnosticsTools.SourceNavigation/DiagnosticsTools.SourceNavigation.csproj" />
+    <ProjectReference Include="../../src/XamlAst/DiagnosticsTools.XamlAst/DiagnosticsTools.XamlAst.csproj" />
     <ProjectReference Include="../../samples/DiagnosticsToolsSample/DiagnosticsToolsSample.csproj" />
   </ItemGroup>
 

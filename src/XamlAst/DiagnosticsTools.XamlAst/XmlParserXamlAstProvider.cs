@@ -11,7 +11,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Utilities;
 using Microsoft.Language.Xml;
 
@@ -25,14 +24,21 @@ namespace Avalonia.Diagnostics.Xaml
 
         private static readonly string[] WatchedExtensions = { ".xaml", ".axaml", ".paml" };
 
-        private readonly ConcurrentDictionary<string, CachedDocument> _cache = new(PathComparer);
+        private readonly ConcurrentDictionary<string, CachedDocument> _cache;
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(PathComparer);
         private readonly CancellationTokenSource _disposeCancellation = new();
+        private readonly IXamlAstInstrumentation _instrumentation;
         private bool _disposed;
         private static readonly Regex XmlEncodingRegex = new(@"encoding\s*=\s*['""](?<encoding>[^'""]+)['""]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
         public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
+
+        public XmlParserXamlAstProvider(IXamlAstInstrumentation? instrumentation = null)
+        {
+            _instrumentation = instrumentation ?? NullXamlAstInstrumentation.Instance;
+            _cache = new ConcurrentDictionary<string, CachedDocument>(PathComparer);
+        }
 
         public async ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
         {
@@ -54,7 +60,7 @@ namespace Avalonia.Diagnostics.Xaml
 
             var timestamp = fileInfo.LastWriteTimeUtc;
             var length = fileInfo.Length;
-            var cached = _cache.GetOrAdd(normalizedPath, _ => new CachedDocument());
+            var cached = _cache.GetOrAdd(normalizedPath, _ => new CachedDocument(_instrumentation));
             var linkedToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
 
             try
@@ -544,8 +550,14 @@ namespace Avalonia.Diagnostics.Xaml
         private sealed class CachedDocument : IDisposable
         {
             private readonly SemaphoreSlim _gate = new(1, 1);
+            private readonly IXamlAstInstrumentation _instrumentation;
             private XamlAstDocument? _document;
             private IXamlAstIndex? _index;
+
+            public CachedDocument(IXamlAstInstrumentation instrumentation)
+            {
+                _instrumentation = instrumentation ?? NullXamlAstInstrumentation.Instance;
+            }
 
             public async ValueTask<CachedDocumentResult> GetOrCreateAsync(
                 string path,
@@ -558,9 +570,10 @@ namespace Avalonia.Diagnostics.Xaml
                 {
                     if (_index is null)
                     {
-                        var buildStart = Stopwatch.GetTimestamp();
+                        var buildStopwatch = Stopwatch.StartNew();
                         _index = XamlAstIndex.Build(cached);
-                        MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(buildStart), "provider", cacheHit: true);
+                        buildStopwatch.Stop();
+                        _instrumentation.RecordAstIndexBuild(buildStopwatch.Elapsed, "provider", cacheHit: true);
                     }
 
                     return new CachedDocumentResult(cached, _index!, null, false);
@@ -573,22 +586,25 @@ namespace Avalonia.Diagnostics.Xaml
                     {
                         if (_index is null)
                         {
-                            var buildStart = Stopwatch.GetTimestamp();
+                            var buildStopwatch = Stopwatch.StartNew();
                             _index = XamlAstIndex.Build(existing);
-                            MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(buildStart), "provider", cacheHit: true);
+                            buildStopwatch.Stop();
+                            _instrumentation.RecordAstIndexBuild(buildStopwatch.Elapsed, "provider", cacheHit: true);
                         }
 
                         return new CachedDocumentResult(existing, _index!, null, false);
                     }
 
                     var previousIndex = _index;
-                    var loadStart = Stopwatch.GetTimestamp();
+                    var loadStopwatch = Stopwatch.StartNew();
                     var document = await factory(cancellationToken).ConfigureAwait(false);
-                    MutationInstrumentation.RecordAstReload(StopwatchHelper.GetElapsedTime(loadStart), "provider", cacheHit: false);
+                    loadStopwatch.Stop();
+                    _instrumentation.RecordAstReload(loadStopwatch.Elapsed, "provider", cacheHit: false);
 
-                    var indexStart = Stopwatch.GetTimestamp();
+                    var indexStopwatch = Stopwatch.StartNew();
                     var index = XamlAstIndex.Build(document);
-                    MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(indexStart), "provider", cacheHit: false);
+                    indexStopwatch.Stop();
+                    _instrumentation.RecordAstIndexBuild(indexStopwatch.Elapsed, "provider", cacheHit: false);
                     _document = document;
                     _index = index;
                     return new CachedDocumentResult(document, index, previousIndex, true);
@@ -610,9 +626,10 @@ namespace Avalonia.Diagnostics.Xaml
 
                 if (_index is null)
                 {
-                    var buildStart = Stopwatch.GetTimestamp();
+                    var buildStopwatch = Stopwatch.StartNew();
                     _index = XamlAstIndex.Build(document);
-                    MutationInstrumentation.RecordAstIndexBuild(StopwatchHelper.GetElapsedTime(buildStart), "provider", cacheHit: true);
+                    buildStopwatch.Stop();
+                    _instrumentation.RecordAstIndexBuild(buildStopwatch.Elapsed, "provider", cacheHit: true);
                 }
 
                 index = _index;

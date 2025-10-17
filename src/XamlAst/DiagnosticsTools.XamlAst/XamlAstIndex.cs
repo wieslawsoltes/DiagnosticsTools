@@ -7,7 +7,7 @@ using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.Xaml
 {
-    internal interface IXamlAstIndex
+    public interface IXamlAstIndex
     {
         IEnumerable<XamlAstNodeDescriptor> Nodes { get; }
 
@@ -26,7 +26,7 @@ namespace Avalonia.Diagnostics.Xaml
         IReadOnlyList<XamlAstNodeDescriptor> FindByResourceKey(string key);
     }
 
-    internal sealed class XamlAstIndex : IXamlAstIndex
+    public sealed class XamlAstIndex : IXamlAstIndex
     {
         private readonly IReadOnlyList<XamlAstNodeDescriptor> _nodes;
         private readonly Dictionary<XamlAstNodeId, XamlAstNodeDescriptor> _nodesById;
