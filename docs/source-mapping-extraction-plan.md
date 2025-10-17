@@ -129,9 +129,9 @@
    - [ ] Stress test file watching by editing `.axaml` files while diagnostics tools are running.
 
 7. [ ] **Documentation & Packaging**
-   - [ ] Update `README.md` and `docs/source-navigation-plan.md` to reference the new libraries and onboarding steps.
-   - [ ] Add XML documentation summaries in public APIs before publishing.
-   - [ ] Decide on NuGet packaging strategy (single package vs. two) and update build scripts if necessary.
+   - [x] Update `README.md` and this plan to reference the new libraries and onboarding steps.
+   - [x] Add XML documentation summaries in public APIs before publishing.
+   - [x] Decide on NuGet packaging strategy (dual packages) and update build scripts accordingly.
 
 ## Risks & Mitigations
 - **Avalonia type coupling:** `SourceInfoService` currently relies on concrete `AvaloniaObject`/`ILogical`. Introduce interfaces or adapter helpers to avoid leaking Avalonia internals outside the app. Provide default adapters in the DiagnosticsTools app.
