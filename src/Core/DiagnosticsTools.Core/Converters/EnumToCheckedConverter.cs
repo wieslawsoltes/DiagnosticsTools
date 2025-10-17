@@ -1,0 +1,23 @@
+using System;
+using System.Globalization;
+using Avalonia.Data;
+using Avalonia.Data.Converters;
+
+namespace Avalonia.Diagnostics.Converters;
+
+public class EnumToCheckedConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        Equals(value, parameter);
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is bool isChecked && isChecked)
+        {
+            return parameter;
+        }
+
+        return BindingOperations.DoNothing;
+    }
+}
+

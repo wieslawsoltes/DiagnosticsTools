@@ -8,6 +8,9 @@ using Avalonia.Utilities;
 
 namespace Avalonia.Diagnostics.Xaml
 {
+    /// <summary>
+    /// Provides an in-memory workspace for parsing and indexing XAML documents.
+    /// </summary>
     public sealed class XamlAstWorkspace : IDisposable
     {
         private readonly IXamlAstProvider _provider;
@@ -25,6 +28,9 @@ namespace Avalonia.Diagnostics.Xaml
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="XamlAstWorkspace"/> class with the default provider.
+        /// </summary>
         public XamlAstWorkspace(IXamlAstInstrumentation? instrumentation = null)
             : this(
                 new XmlParserXamlAstProvider(instrumentation),
@@ -32,6 +38,9 @@ namespace Avalonia.Diagnostics.Xaml
         {
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="XamlAstWorkspace"/> class using the supplied provider.
+        /// </summary>
         public XamlAstWorkspace(IXamlAstProvider provider, IXamlAstInstrumentation? instrumentation = null)
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));

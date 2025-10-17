@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:metrics="clr-namespace:Avalonia.Diagnostics.ViewModels.Metrics;assembly=DiagnosticsTools"
-             xmlns:conv="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
+             xmlns:conv="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools.Metrics"
              xmlns:ctrl="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              x:Class="Avalonia.Diagnostics.Views.MetricsPageView"
              x:DataType="metrics:MetricsPageViewModel"

@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net6.0;netstandard2.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <AssemblyName>DiagnosticsTools.Core</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics</RootNamespace>
+    <PackageId>DiagnosticsTools.Core</PackageId>
+    <Authors>Avalonia Diagnostics Maintainers</Authors>
+    <Company>Avalonia Diagnostics Maintainers</Company>
+    <Description>Shared utility helpers used across DiagnosticsTools packages.</Description>
+    <PackageTags>avalonia;diagnostics;utilities</PackageTags>
+    <RepositoryUrl>https://github.com/AvaloniaUI/DiagnosticsTools</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.*" />
+    <PackageReference Include="IgnoresAccessChecksToGenerator" Version="0.8.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <IgnoresAccessChecksTo Include="Avalonia.Base" />
+    <IgnoresAccessChecksTo Include="Avalonia.Controls" />
+    <IgnoresAccessChecksTo Include="Avalonia.Visuals" />
+  </ItemGroup>
+
+</Project>

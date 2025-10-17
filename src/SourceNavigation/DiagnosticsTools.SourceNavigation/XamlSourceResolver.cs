@@ -8,6 +8,9 @@ using System.Xml.Linq;
 
 namespace Avalonia.Diagnostics.SourceNavigation
 {
+    /// <summary>
+    /// Provides helpers for mapping Avalonia logical tree elements back to their originating XAML documents.
+    /// </summary>
     public sealed class XamlSourceResolver
     {
         private readonly ILogicalTreePathBuilder _pathBuilder;
@@ -15,6 +18,12 @@ namespace Avalonia.Diagnostics.SourceNavigation
         private readonly Func<Type, CancellationToken, ValueTask<SourceInfo?>> _rootSourceResolver;
         private readonly ConcurrentDictionary<Type, XamlDocumentCacheEntry> _documentCache = new();
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="XamlSourceResolver"/> class.
+        /// </summary>
+        /// <param name="pathBuilder">Logical tree path builder implementation.</param>
+        /// <param name="documentLocator">Document locator capable of retrieving XAML documents.</param>
+        /// <param name="rootSourceResolver">Delegate used to resolve the XAML root type to a <see cref="SourceInfo"/>.</param>
         public XamlSourceResolver(
             ILogicalTreePathBuilder pathBuilder,
             IXamlDocumentLocator documentLocator,
@@ -25,6 +34,11 @@ namespace Avalonia.Diagnostics.SourceNavigation
             _rootSourceResolver = rootSourceResolver ?? throw new ArgumentNullException(nameof(rootSourceResolver));
         }
 
+        /// <summary>
+        /// Attempts to resolve a logical tree node to its XAML source location.
+        /// </summary>
+        /// <param name="node">The node to resolve.</param>
+        /// <param name="cancellationToken">Cancellation token for asynchronous work.</param>
         public async ValueTask<SourceInfo?> TryResolveAsync(object node, CancellationToken cancellationToken = default)
         {
             if (!_pathBuilder.TryBuildPath(node, out var root, out var path))

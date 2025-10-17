@@ -5,6 +5,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
+using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.LogicalTree;
@@ -14,7 +15,7 @@ using System.Linq;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
-    public abstract class TreeNode : ViewModelBase, ITreeNode, IDisposable
+    public abstract class TreeNode : ViewModelBase, ITreeNode, IDisposable, IMutableTreeNode
     {
         private readonly IDisposable? _classesSubscription;
         private string _classes;
@@ -101,6 +102,8 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             get;
         }
+
+        IMutableTreeNode? IMutableTreeNode.Parent => Parent;
 
         public string Type
         {

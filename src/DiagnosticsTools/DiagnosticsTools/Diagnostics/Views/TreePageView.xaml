@@ -3,7 +3,7 @@
              xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
              xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
              xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools"
-             xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools"
+             xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools.Core"
              x:Class="Avalonia.Diagnostics.Views.TreePageView"
              x:DataType="vm:TreePageViewModel"
              x:CompileBindings="True">

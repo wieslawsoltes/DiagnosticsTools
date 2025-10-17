@@ -4,6 +4,14 @@
     <AssemblyName>DiagnosticsTools.SourceNavigation</AssemblyName>
     <RootNamespace>Avalonia.Diagnostics.SourceNavigation</RootNamespace>
     <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>DiagnosticsTools.SourceNavigation</PackageId>
+    <Authors>Avalonia Diagnostics Maintainers</Authors>
+    <Company>Avalonia Diagnostics Maintainers</Company>
+    <Description>Portable PDB + SourceLink resolution helpers used by DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;pdb;sourcelink;xaml</PackageTags>
+    <RepositoryUrl>https://github.com/AvaloniaUI/DiagnosticsTools</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />

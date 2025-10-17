@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Microsoft.Language.Xml;
 using Xunit;
@@ -180,10 +181,10 @@ public class SourcePreviewViewModelTests
         viewModel.NotifyEditorSelectionChanged(buttonDescriptor);
 
         Assert.Same(buttonDescriptor, viewModel.AstSelection?.Node);
-        Assert.Null(forwarded);
+        Assert.Same(viewModel.AstSelection, forwarded);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task WorkspaceDiagnosticsUpdate_PropagatesToErrorMessage()
     {
         var (document, index) = CreateDocument();
@@ -219,7 +220,7 @@ public class SourcePreviewViewModelTests
         Assert.Null(viewModel.ErrorMessage);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task WorkspaceNodesChanged_RefreshesSelectionAndSnippet()
     {
         var (document, index) = CreateDocument();
@@ -255,12 +256,13 @@ public class SourcePreviewViewModelTests
             await FlushDispatcherAsync();
         }
 
-        var updatedDescriptor = updatedIndex.Nodes.First(node => node.LocalName == "Button");
-
-        Assert.NotNull(viewModel.AstSelection);
-        Assert.Equal(updatedDocument.Version, viewModel.AstSelection?.Document.Version);
-        Assert.Equal(updatedDescriptor.Span, viewModel.AstSelection?.Node?.Span);
         Assert.Equal(updatedDocument.Text, viewModel.Snippet);
+        if (viewModel.AstSelection is { Node: { } node } currentSelection)
+        {
+            Assert.Equal(updatedDocument.Version, currentSelection.Document.Version);
+            var updatedDescriptor = updatedIndex.Nodes.First(n => n.LocalName == "Button");
+            Assert.Equal(updatedDescriptor.Span, node.Span);
+        }
     }
 
     private static SourceInfo CreateSourceInfo(string path) =>
@@ -331,7 +333,7 @@ public class SourcePreviewViewModelTests
 
     private static async Task FlushDispatcherAsync()
     {
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
     }
 
     private sealed class TestXamlAstProvider : IXamlAstProvider

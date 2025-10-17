@@ -32,12 +32,8 @@
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.*" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.*" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.*" />
-    <PackageReference Include="GuiLabs.Language.Xml" Version="1.2.15" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="4.9.2" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.9.2" />
-    <PackageReference Include="System.Text.Json" Version="6.0.11" />
-    <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />
-    <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
   </ItemGroup>
 
   <!-- Include .xaml files as AvaloniaXaml (SDK only includes .axaml by default) -->
@@ -48,6 +44,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SourceNavigation\DiagnosticsTools.SourceNavigation\DiagnosticsTools.SourceNavigation.csproj" />
     <ProjectReference Include="..\..\XamlAst\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj" />
+    <ProjectReference Include="..\..\PropertyEditing\DiagnosticsTools.PropertyEditing\DiagnosticsTools.PropertyEditing.csproj" />
+    <ProjectReference Include="..\..\Runtime\DiagnosticsTools.Runtime\DiagnosticsTools.Runtime.csproj" />
+    <ProjectReference Include="..\..\Input\DiagnosticsTools.Input\DiagnosticsTools.Input.csproj" />
+    <ProjectReference Include="..\..\Screenshots\DiagnosticsTools.Screenshots\DiagnosticsTools.Screenshots.csproj" />
+    <ProjectReference Include="..\..\Metrics\DiagnosticsTools.Metrics\DiagnosticsTools.Metrics.csproj" />
+    <ProjectReference Include="..\..\Core\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
   </ItemGroup>
 
 </Project>

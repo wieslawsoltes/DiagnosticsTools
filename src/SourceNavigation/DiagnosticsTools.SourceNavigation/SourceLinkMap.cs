@@ -4,6 +4,9 @@ using System.Text.Json;
 
 namespace Avalonia.Diagnostics.SourceNavigation
 {
+    /// <summary>
+    /// Parses and evaluates SourceLink mappings embedded in portable PDBs.
+    /// </summary>
     public sealed class SourceLinkMap
     {
         private readonly List<Entry> _entries;
@@ -13,6 +16,9 @@ namespace Avalonia.Diagnostics.SourceNavigation
             _entries = entries;
         }
 
+        /// <summary>
+        /// Attempts to parse the JSON payload of a SourceLink blob.
+        /// </summary>
         public static SourceLinkMap? TryLoad(ReadOnlySpan<byte> jsonPayload)
         {
             if (jsonPayload.IsEmpty)
@@ -53,6 +59,9 @@ namespace Avalonia.Diagnostics.SourceNavigation
             }
         }
 
+        /// <summary>
+        /// Resolves the provided document path to a remote SourceLink URI if one is available.
+        /// </summary>
         public Uri? TryResolve(string documentPath)
         {
             if (string.IsNullOrEmpty(documentPath))

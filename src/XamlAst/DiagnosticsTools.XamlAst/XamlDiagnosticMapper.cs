@@ -5,6 +5,9 @@ using Microsoft.Language.Xml;
 
 namespace Avalonia.Diagnostics.Xaml
 {
+    /// <summary>
+    /// Converts diagnostics produced by the XML parser into <see cref="XamlAstDiagnostic"/> instances.
+    /// </summary>
     public static class XamlDiagnosticMapper
     {
         public static IReadOnlyList<XamlAstDiagnostic> CollectDiagnostics(XmlDocumentSyntax syntax)

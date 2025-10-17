@@ -5,6 +5,9 @@ using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.Xaml
 {
+    /// <summary>
+    /// Provides access to XAML documents, diagnostics, and change notifications.
+    /// </summary>
     public interface IXamlAstProvider : IDisposable
     {
         event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
@@ -17,6 +20,9 @@ namespace Avalonia.Diagnostics.Xaml
         void InvalidateAll();
     }
 
+    /// <summary>
+    /// Describes a change made to a XAML document.
+    /// </summary>
     public sealed class XamlDocumentChangedEventArgs : EventArgs
     {
         public XamlDocumentChangedEventArgs(string path, XamlDocumentChangeKind kind, XamlAstDocument? document = null, Exception? error = null)
@@ -36,6 +42,9 @@ namespace Avalonia.Diagnostics.Xaml
         public Exception? Error { get; }
     }
 
+    /// <summary>
+    /// Contains diagnostics update information for a XAML document.
+    /// </summary>
     public sealed class XamlDiagnosticsChangedEventArgs : EventArgs
     {
         public XamlDiagnosticsChangedEventArgs(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstDiagnostic> diagnostics)
@@ -52,6 +61,9 @@ namespace Avalonia.Diagnostics.Xaml
         public IReadOnlyList<XamlAstDiagnostic> Diagnostics { get; }
     }
 
+    /// <summary>
+    /// Describes a set of AST node changes between document versions.
+    /// </summary>
     public sealed class XamlAstNodesChangedEventArgs : EventArgs
     {
         public XamlAstNodesChangedEventArgs(string path, XamlDocumentVersion version, IReadOnlyList<XamlAstNodeChange> changes)
@@ -68,6 +80,9 @@ namespace Avalonia.Diagnostics.Xaml
         public IReadOnlyList<XamlAstNodeChange> Changes { get; }
     }
 
+    /// <summary>
+    /// Represents a single AST node transition between document versions.
+    /// </summary>
     public sealed class XamlAstNodeChange
     {
         public XamlAstNodeChange(XamlAstNodeChangeKind kind, XamlAstNodeDescriptor? oldNode, XamlAstNodeDescriptor? newNode)
@@ -84,6 +99,9 @@ namespace Avalonia.Diagnostics.Xaml
         public XamlAstNodeDescriptor? NewNode { get; }
     }
 
+    /// <summary>
+    /// Types of AST node transitions detected between document versions.
+    /// </summary>
     public enum XamlAstNodeChangeKind
     {
         Added,
@@ -91,6 +109,9 @@ namespace Avalonia.Diagnostics.Xaml
         Updated
     }
 
+    /// <summary>
+    /// Types of document-level changes raised by a provider.
+    /// </summary>
     public enum XamlDocumentChangeKind
     {
         Updated,

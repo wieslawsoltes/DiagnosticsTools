@@ -3,6 +3,9 @@ using System.Collections.Generic;
 
 namespace Avalonia.Diagnostics.Xaml
 {
+    /// <summary>
+    /// Computes structural differences between two XAML AST indexes.
+    /// </summary>
     public static class XamlAstNodeDiffer
     {
         public static IReadOnlyList<XamlAstNodeChange> Diff(IXamlAstIndex? oldIndex, IXamlAstIndex newIndex)

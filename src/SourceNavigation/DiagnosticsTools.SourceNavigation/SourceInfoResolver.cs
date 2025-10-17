@@ -9,6 +9,9 @@ using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.SourceNavigation
 {
+    /// <summary>
+    /// Resolves <see cref="SourceInfo"/> for CLR members and diagnostic objects by inspecting portable PDB metadata.
+    /// </summary>
     public sealed class SourceInfoResolver : ISourceInfoResolver, IDisposable
     {
         private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
@@ -19,6 +22,11 @@ namespace Avalonia.Diagnostics.SourceNavigation
         private readonly Func<object?, CancellationToken, ValueTask<SourceInfo?>>? _valueFrameResolver;
         private bool _disposed;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SourceInfoResolver"/> class.
+        /// </summary>
+        /// <param name="assemblyLocationSelector">Optional selector used to determine the on-disk location of an assembly.</param>
+        /// <param name="valueFrameResolver">Optional delegate used to resolve non-member diagnostics.</param>
         public SourceInfoResolver(
             Func<Assembly, string?>? assemblyLocationSelector = null,
             Func<object?, CancellationToken, ValueTask<SourceInfo?>>? valueFrameResolver = null)
@@ -27,6 +35,7 @@ namespace Avalonia.Diagnostics.SourceNavigation
             _valueFrameResolver = valueFrameResolver;
         }
 
+        /// <inheritdoc />
         public async ValueTask<SourceInfo?> GetForMemberAsync(
             MemberInfo member,
             CancellationToken cancellationToken = default)
@@ -112,6 +121,7 @@ namespace Avalonia.Diagnostics.SourceNavigation
             return null;
         }
 
+        /// <inheritdoc />
         public ValueTask<SourceInfo?> GetForValueFrameAsync(
             object? valueFrameDiagnostic,
             CancellationToken cancellationToken = default)
