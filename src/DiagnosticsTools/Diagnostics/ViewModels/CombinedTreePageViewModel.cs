@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
-using Avalonia.Diagnostics.Runtime;
+using Avalonia.Styling;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -69,6 +71,52 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return base.CanNodeMatch(node);
+        }
+
+        protected override TreeNode? ResolveSelectionTarget(TreeNode node) =>
+            SearchLogicalNodesOnly
+                ? GetLogicalAncestor(node)
+                : node;
+
+        private static TreeNode? GetLogicalAncestor(TreeNode? node)
+        {
+            var current = node;
+
+            while (current is not null)
+            {
+                if (current is CombinedTreeNode combined)
+                {
+                    if (combined.Role == CombinedTreeNode.CombinedNodeRole.Logical &&
+                        !IsTemplateLogicalNode(combined))
+                    {
+                        return combined;
+                    }
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static bool IsTemplateLogicalNode(CombinedTreeNode node)
+        {
+            if (node.Role != CombinedTreeNode.CombinedNodeRole.Logical)
+            {
+                return false;
+            }
+
+            if (node.Visual is StyledElement { TemplatedParent: { } })
+            {
+                return true;
+            }
+
+            if (node.Visual is Control { TemplatedParent: { } })
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

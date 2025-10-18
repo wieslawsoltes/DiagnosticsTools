@@ -1249,28 +1249,42 @@ namespace Avalonia.Diagnostics.ViewModels
             });
         }
 
-        public void SelectControl(Control control)
+        public virtual void SelectControl(Control control)
         {
-            var node = default(TreeNode);
-            Control? c = control;
+            TreeNode? node = null;
+            Control? candidate = control;
+            var visited = new HashSet<Control>();
 
-            while (node == null && c != null)
+            while (candidate is not null && visited.Add(candidate))
             {
-                node = FindNode(c);
+                node = FindNode(candidate);
 
-                if (node == null)
+                if (node is not null)
                 {
-                    c = c.GetVisualParent<Control>();
+                    break;
                 }
+
+                var templatedParent = candidate.TemplatedParent as Control;
+                if (templatedParent is not null && !visited.Contains(templatedParent))
+                {
+                    candidate = templatedParent;
+                    continue;
+                }
+
+                candidate = candidate.GetVisualParent<Control>();
             }
 
-            if (node != null)
+            if (node is null)
             {
-                ExpandNode(node.Parent);
-                // Use dispatcher to allow the tree to expand and render before selecting
-                Dispatcher.UIThread.Post(() => SelectedNode = node, DispatcherPriority.Loaded);
+                return;
             }
+
+            ExpandNode(node.Parent);
+            // Use dispatcher to allow the tree to expand and render before selecting
+            Dispatcher.UIThread.Post(() => SelectedNode = node, DispatcherPriority.Loaded);
         }
+
+        protected virtual TreeNode? ResolveSelectionTarget(TreeNode node) => node;
 
         public void CopySelector()
         {
@@ -2474,11 +2488,14 @@ namespace Avalonia.Diagnostics.ViewModels
             return current;
         }
 
+        protected virtual bool MatchesSelectedControl(TreeNode node, Control control) =>
+            ReferenceEquals(node.Visual, control);
+
         private TreeNode? FindNode(TreeNode node, Control control)
         {
-            if (node.Visual == control)
+            if (MatchesSelectedControl(node, control))
             {
-                return node;
+                return ResolveSelectionTarget(node);
             }
             else
             {
