@@ -66,7 +66,7 @@
 **Public Surface (initial proposal)**
 - `XamlAstWorkspace`, `XamlAstDocument`, `XamlDocumentVersion`.
 - `IXamlAstProvider`, `IXamlAstIndex`, `XamlAstNodeDescriptor`, and related descriptor/diagnostic types.
-- `IXamlAstInstrumentation` (new) to record timing/metrics, defaulting to a no-op implementation.
+- `IXamlAstInstrumentation` (new) to record timing telemetry, defaulting to a no-op implementation.
 
 **Internal Organisation**
 - Retain parsing and diffing logic but relocate file watching, caching, and SHA-256 checksum routines into internal helpers.
@@ -138,7 +138,7 @@
 - **File watcher reliability:** Moving `XmlParserXamlAstProvider` could expose platform-specific watcher bugs; add integration tests using `FileSystemWatcher` and consider abstractions for unit tests.
 - **Remote SourceLink latency:** Centralising SourceLink HTTP fetch logic inside the library may require cancellation/timeout controls; expose `HttpMessageHandler` injection for testability.
 - **Binary compatibility:** Keep legacy namespaces or provide type-forwarders if external consumers already reference `Avalonia.Diagnostics.*` types.
-- **Instrumentation change:** Metrics instrumentation has been retired; ensure `IXamlAstInstrumentation` remains safe as a no-op and continues to support optional telemetry sinks.
+- **Instrumentation change:** Legacy instrumentation has been retired; ensure `IXamlAstInstrumentation` remains safe as a no-op and continues to support optional telemetry sinks.
 
 ## Open Questions / Follow-Ups
 - Confirm desired target frameworks for the new projects (match app or extend to netstandard2.0 for broader reuse?).
