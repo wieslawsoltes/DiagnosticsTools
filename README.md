@@ -36,10 +36,6 @@ DiagnosticsTools now ships a suite of standalone libraries that can be reused ou
 - [`DiagnosticsTools.Runtime`](./src/Runtime/DiagnosticsTools.Runtime/README.md) – Runtime undo/redo coordinator and tree abstractions for hot reload scenarios.
 - [`DiagnosticsTools.Input`](./src/Input/DiagnosticsTools.Input/README.md) – Reusable hot key configuration and behaviours.
 - [`DiagnosticsTools.Screenshots`](./src/Screenshots/DiagnosticsTools.Screenshots/README.md) – Screenshot handler interfaces and default file picker implementation.
-- [`DiagnosticsTools.DiagnosticsPublisher`](./src/Publisher/DiagnosticsTools.DiagnosticsPublisher/DiagnosticsTools.DiagnosticsPublisher.csproj) – Lightweight UDP publisher that streams metrics and diagnostics envelopes out-of-process.
-- [`DiagnosticsTools.DiagnosticsContracts`](./src/Contracts/DiagnosticsTools.DiagnosticsContracts/DiagnosticsTools.DiagnosticsContracts.csproj) – Shared envelope models consumed by the publisher, monitor, viewer, and DevTools thin client.
-- [`DiagnosticsTools.Monitor`](./src/Monitor/DiagnosticsTools.Monitor/DiagnosticsTools.Monitor.csproj) – Standalone metrics monitor (port of Metriclonia) that listens on UDP for live performance data.
-- [`DiagnosticsTools.DiagnosticsViewer`](./src/Viewer/DiagnosticsTools.DiagnosticsViewer/DiagnosticsTools.DiagnosticsViewer.csproj) – Standalone diagnostics console that displays visual tree snapshots and event streams via UDP.
 - [`DiagnosticsTools.SourceNavigation`](./src/SourceNavigation/DiagnosticsTools.SourceNavigation/README.md) – Portable PDB + SourceLink resolution with high-level helpers such as `SourceInfoResolver` and `XamlSourceResolver`.
 - [`DiagnosticsTools.XamlAst`](./src/XamlAst/DiagnosticsTools.XamlAst/README.md) – A lightweight XAML workspace that indexes documents, raises change notifications, and surfaces diagnostic information.
 

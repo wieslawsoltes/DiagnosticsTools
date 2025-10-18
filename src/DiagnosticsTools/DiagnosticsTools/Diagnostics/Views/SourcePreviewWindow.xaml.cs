@@ -29,7 +29,7 @@ namespace Avalonia.Diagnostics.Views
         private SourcePreviewScrollCoordinator? _scrollCoordinator;
         private IDisposable? _primarySync;
         private IDisposable? _runtimeSync;
-        private bool _isApplyingSplitMetrics;
+        private bool _isApplyingSplitLayout;
 
         public SourcePreviewWindow()
         {
@@ -178,7 +178,7 @@ namespace Avalonia.Diagnostics.Views
             var ratio = vm.SplitRatio;
             var complementary = Math.Max(0.05, 1.0 - ratio);
 
-            _isApplyingSplitMetrics = true;
+            _isApplyingSplitLayout = true;
             try
             {
                 if (vm.SplitOrientation == SourcePreviewSplitOrientation.Horizontal)
@@ -264,13 +264,13 @@ namespace Avalonia.Diagnostics.Views
             }
             finally
             {
-                _isApplyingSplitMetrics = false;
+                _isApplyingSplitLayout = false;
             }
         }
 
         private void OnComparisonGridLayoutUpdated(object? sender, EventArgs e)
         {
-            if (_isApplyingSplitMetrics)
+            if (_isApplyingSplitLayout)
             {
                 return;
             }
