@@ -8,37 +8,41 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{4AE8F4C3-0462-4DB0-885D-3F5974FA095F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools", "src\DiagnosticsTools\DiagnosticsTools\DiagnosticsTools.csproj", "{EE479C39-22DA-43CA-A140-5A49B9EC6357}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools", "src\DiagnosticsTools\DiagnosticsTools.csproj", "{EE479C39-22DA-43CA-A140-5A49B9EC6357}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.SourceNavigation", "src\SourceNavigation\DiagnosticsTools.SourceNavigation\DiagnosticsTools.SourceNavigation.csproj", "{15F9F4E2-2A9E-49D2-9BB7-EBB8EC998310}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.SourceNavigation", "src\DiagnosticsTools.SourceNavigation\DiagnosticsTools.SourceNavigation.csproj", "{15F9F4E2-2A9E-49D2-9BB7-EBB8EC998310}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.XamlAst", "src\XamlAst\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj", "{E2B16FB2-5F2A-40B7-8CAB-7BD8AEF7F6C9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.XamlAst", "src\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj", "{E2B16FB2-5F2A-40B7-8CAB-7BD8AEF7F6C9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.PropertyEditing", "src\PropertyEditing\DiagnosticsTools.PropertyEditing\DiagnosticsTools.PropertyEditing.csproj", "{5E3CAB97-5882-4F1A-8687-28F4353832A9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.PropertyEditing", "src\DiagnosticsTools.PropertyEditing\DiagnosticsTools.PropertyEditing.csproj", "{5E3CAB97-5882-4F1A-8687-28F4353832A9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Runtime", "src\Runtime\DiagnosticsTools.Runtime\DiagnosticsTools.Runtime.csproj", "{152DF7DD-A165-4F2C-A92E-3F047EE85C34}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Runtime", "src\DiagnosticsTools.Runtime\DiagnosticsTools.Runtime.csproj", "{152DF7DD-A165-4F2C-A92E-3F047EE85C34}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Input", "src\Input\DiagnosticsTools.Input\DiagnosticsTools.Input.csproj", "{48A75191-7DCB-4A87-9000-75F8C0FD6417}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Input", "src\DiagnosticsTools.Input\DiagnosticsTools.Input.csproj", "{48A75191-7DCB-4A87-9000-75F8C0FD6417}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Screenshots", "src\Screenshots\DiagnosticsTools.Screenshots\DiagnosticsTools.Screenshots.csproj", "{ED09A54B-98D3-4E23-8A56-6A4FF0620E55}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Screenshots", "src\DiagnosticsTools.Screenshots\DiagnosticsTools.Screenshots.csproj", "{ED09A54B-98D3-4E23-8A56-6A4FF0620E55}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Core", "src\Core\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj", "{38B6775F-4F60-4F14-B49B-48550A2F851B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Core", "src\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj", "{38B6775F-4F60-4F14-B49B-48550A2F851B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.VirtualizedTreeView", "src\DiagnosticsTools.VirtualizedTreeView\DiagnosticsTools.VirtualizedTreeView.csproj", "{83132573-1955-4466-A5ED-F78E794A7F15}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsToolsSample", "samples\DiagnosticsToolsSample\DiagnosticsToolsSample.csproj", "{4B181F44-419D-4DF1-835D-548DF7E309D4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Tests", "tests\DiagnosticsTools.Tests\DiagnosticsTools.Tests.csproj", "{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SourceNavigation.Tests", "tests\SourceNavigation.Tests\SourceNavigation.Tests.csproj", "{8EEC1D4E-4C5E-47C2-B442-16AA0A3E926C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.SourceNavigation.Tests", "tests\DiagnosticsTools.SourceNavigation.Tests\DiagnosticsTools.SourceNavigation.Tests.csproj", "{8EEC1D4E-4C5E-47C2-B442-16AA0A3E926C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PropertyEditing.Tests", "tests\PropertyEditing.Tests\PropertyEditing.Tests.csproj", "{F6E3C7C2-8DB0-4F23-8BB3-8B90B9C13C20}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.PropertyEditing.Tests", "tests\DiagnosticsTools.PropertyEditing.Tests\DiagnosticsTools.PropertyEditing.Tests.csproj", "{F6E3C7C2-8DB0-4F23-8BB3-8B90B9C13C20}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Tests", "tests\Runtime.Tests\Runtime.Tests.csproj", "{A2ADE62D-786A-4E2D-87DB-D9671C8BD5E9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Runtime.Tests", "tests\DiagnosticsTools.Runtime.Tests\DiagnosticsTools.Runtime.Tests.csproj", "{A2ADE62D-786A-4E2D-87DB-D9671C8BD5E9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Input.Tests", "tests\Input.Tests\Input.Tests.csproj", "{DE216C9F-5F12-4A91-A8F1-332776BF3E0C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Input.Tests", "tests\DiagnosticsTools.Input.Tests\DiagnosticsTools.Input.Tests.csproj", "{DE216C9F-5F12-4A91-A8F1-332776BF3E0C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Screenshots.Tests", "tests\Screenshots.Tests\Screenshots.Tests.csproj", "{C4A6B60F-9E20-4244-889E-25070D22A65D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Screenshots.Tests", "tests\DiagnosticsTools.Screenshots.Tests\DiagnosticsTools.Screenshots.Tests.csproj", "{C4A6B60F-9E20-4244-889E-25070D22A65D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Core.Tests", "tests\Core.Tests\Core.Tests.csproj", "{6A653E7C-5527-472E-90EB-A99C3902A89B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.Core.Tests", "tests\DiagnosticsTools.Core.Tests\DiagnosticsTools.Core.Tests.csproj", "{6A653E7C-5527-472E-90EB-A99C3902A89B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiagnosticsTools.VirtualizedTreeView.Tests", "tests\DiagnosticsTools.VirtualizedTreeView.Tests\DiagnosticsTools.VirtualizedTreeView.Tests.csproj", "{633200B8-709E-4CD5-9C6B-96B6E2501392}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -78,6 +82,10 @@ Global
 		{38B6775F-4F60-4F14-B49B-48550A2F851B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{38B6775F-4F60-4F14-B49B-48550A2F851B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{38B6775F-4F60-4F14-B49B-48550A2F851B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{83132573-1955-4466-A5ED-F78E794A7F15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{83132573-1955-4466-A5ED-F78E794A7F15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{83132573-1955-4466-A5ED-F78E794A7F15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{83132573-1955-4466-A5ED-F78E794A7F15}.Release|Any CPU.Build.0 = Release|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4B181F44-419D-4DF1-835D-548DF7E309D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -110,6 +118,10 @@ Global
 		{6A653E7C-5527-472E-90EB-A99C3902A89B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6A653E7C-5527-472E-90EB-A99C3902A89B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6A653E7C-5527-472E-90EB-A99C3902A89B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{633200B8-709E-4CD5-9C6B-96B6E2501392}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{633200B8-709E-4CD5-9C6B-96B6E2501392}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{633200B8-709E-4CD5-9C6B-96B6E2501392}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{633200B8-709E-4CD5-9C6B-96B6E2501392}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -123,6 +135,7 @@ Global
 		{48A75191-7DCB-4A87-9000-75F8C0FD6417} = {F00CCEAC-F5A0-400B-8B44-1793558F2B66}
 		{ED09A54B-98D3-4E23-8A56-6A4FF0620E55} = {F00CCEAC-F5A0-400B-8B44-1793558F2B66}
 		{38B6775F-4F60-4F14-B49B-48550A2F851B} = {F00CCEAC-F5A0-400B-8B44-1793558F2B66}
+		{83132573-1955-4466-A5ED-F78E794A7F15} = {F00CCEAC-F5A0-400B-8B44-1793558F2B66}
 		{4B181F44-419D-4DF1-835D-548DF7E309D4} = {4AE8F4C3-0462-4DB0-885D-3F5974FA095F}
 		{A5CAD215-9A0C-4368-ACF1-32A21C99C5C9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{8EEC1D4E-4C5E-47C2-B442-16AA0A3E926C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
@@ -131,6 +144,7 @@ Global
 		{DE216C9F-5F12-4A91-A8F1-332776BF3E0C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{C4A6B60F-9E20-4244-889E-25070D22A65D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{6A653E7C-5527-472E-90EB-A99C3902A89B} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{633200B8-709E-4CD5-9C6B-96B6E2501392} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B7C9F6F8-0C13-4A3F-9705-720D9C921182}

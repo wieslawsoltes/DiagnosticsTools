@@ -34,6 +34,10 @@
 5. **DiagnosticsTools.Core**
    - Shared utility layer (converters, visual extensions, visual tree debug helpers). Serves as a foundational package for non-UI logic.
 
+6. **DiagnosticsTools.VirtualizedTreeView**
+   - `VirtualizedTreeView`, `VirtualizedTreeViewItem`, converters, and flat-tree helpers powering the visual tree surfaces.
+   - Should expose the control and adapters so host applications can embed the same virtualized tree experience.
+
 ## Dependency Inventory (Checklist Item 1)
 
 ### Property Editing (`Diagnostics/PropertyEditing`)
@@ -152,7 +156,7 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
    - Annotate internal-only code in the DevTools UI that will become consumers of the new packages.
 
 3. **Create New Class Library Projects**
-   - Scaffold SDK-style projects under `src/PropertyEditing`, `src/Runtime`, `src/Screenshots`, etc., mirroring the pattern established by `SourceNavigation`/`XamlAst`.
+   - Scaffold SDK-style projects under `src/DiagnosticsTools.PropertyEditing`, `src/DiagnosticsTools.Runtime`, `src/DiagnosticsTools.Screenshots`, `src/DiagnosticsTools.VirtualizedTreeView`, etc., mirroring the pattern established by `DiagnosticsTools.SourceNavigation`/`DiagnosticsTools.XamlAst`.
    - Establish shared Directory.Build props to align TFMs (`netstandard2.0`, `net6.0`, `net8.0`) and packaging metadata.
 
 4. **Incremental Code Migration**
@@ -168,7 +172,7 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 6. **Testing & Validation**
    - Extend unit tests for each new package (mutation pipeline, runtime coordinator, screenshot provider).
    - Run targeted DevTools integration tests and perform manual QA to confirm observed behaviour is unchanged.
-   - Dedicated test projects exist for `DiagnosticsTools.PropertyEditing`, `DiagnosticsTools.Runtime`, `DiagnosticsTools.Input`, `DiagnosticsTools.Screenshots`, and `DiagnosticsTools.Core` to exercise the public contracts added during extraction.
+   - Dedicated test projects exist for `DiagnosticsTools.PropertyEditing`, `DiagnosticsTools.Runtime`, `DiagnosticsTools.Input`, `DiagnosticsTools.Screenshots`, `DiagnosticsTools.Core`, and `DiagnosticsTools.VirtualizedTreeView`, keeping package validation isolated from the DevTools UI.
    - Provide headless harnesses/mocks (e.g., storage providers, timers, dispatcher adapters) so screenshot and hotkey tests can execute without UI dependencies.
 
 7. **Documentation & Packaging**

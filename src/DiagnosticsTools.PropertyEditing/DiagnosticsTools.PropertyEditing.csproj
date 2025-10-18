@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.PropertyEditing</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.PropertyEditing</RootNamespace>
+    <PackageId>DiagnosticsTools.PropertyEditing</PackageId>
+    <Description>Mutation orchestration, journaling, and inspector infrastructure extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;property-editing;xaml</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj" />
+    <ProjectReference Include="..\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="GuiLabs.Language.Xml" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.IO.Hashing" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+  </ItemGroup>
+
+</Project>

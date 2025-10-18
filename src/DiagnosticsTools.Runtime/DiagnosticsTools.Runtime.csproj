@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.Runtime</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.Runtime</RootNamespace>
+    <PackageId>DiagnosticsTools.Runtime</PackageId>
+    <Description>Runtime mutation coordination helpers extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;runtime;undo</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+</Project>

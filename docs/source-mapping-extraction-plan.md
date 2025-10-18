@@ -9,18 +9,18 @@
 ## Current State Overview
 
 ### PDB & Source Mapping Pipeline
-- `src/DiagnosticsTools/DiagnosticsTools/Diagnostics/SourceNavigation/SourceInfoService.cs` coordinates source lookup for CLR members and Avalonia objects. It owns:
+- `src/DiagnosticsTools/Diagnostics/SourceNavigation/SourceInfoService.cs` coordinates source lookup for CLR members and Avalonia objects. It owns:
   - A cache of `PortablePdbResolver` instances keyed by assembly path.
   - XAML document acquisition (`BuildXamlDocumentAsync`) and logical-tree-to-XAML-node mapping via private `XamlDocument`/`XamlNode` classes.
   - Resource metadata deserialisation (`ResourceXamlInfo`) and remote SourceLink fetch logic.
-- `src/DiagnosticsTools/DiagnosticsTools/Diagnostics/SourceNavigation/PortablePdbResolver.cs` wraps `System.Reflection.Metadata` to read sequence points, SourceLink blobs, embedded/loose PDBs, and returns `SourceInfo`.
-- `src/DiagnosticsTools/DiagnosticsTools/Diagnostics/SourceNavigation/SourceLinkMap.cs` parses SourceLink JSON and resolves document URIs.
-- `src/DiagnosticsTools/DiagnosticsTools/Diagnostics/SourceNavigation/SourceInfo.cs` models source metadata and origin tracking.
+- `src/DiagnosticsTools/Diagnostics/SourceNavigation/PortablePdbResolver.cs` wraps `System.Reflection.Metadata` to read sequence points, SourceLink blobs, embedded/loose PDBs, and returns `SourceInfo`.
+- `src/DiagnosticsTools/Diagnostics/SourceNavigation/SourceLinkMap.cs` parses SourceLink JSON and resolves document URIs.
+- `src/DiagnosticsTools/Diagnostics/SourceNavigation/SourceInfo.cs` models source metadata and origin tracking.
 - Consumers obtain an `ISourceInfoService` from `MainWindow.xaml.cs` and propagate it through view models (e.g., `Diagnostics/ViewModels/MainViewModel.cs`, `TreePageViewModel.cs`, `ValueFrameViewModel.cs`) to drive source previews.
-- Unit coverage sits in `tests/DiagnosticsTools.Tests/PortablePdbResolverTests.cs`.
+- Unit coverage sits in `tests/DiagnosticsTools.SourceNavigation.Tests/PortablePdbResolverTests.cs`.
 
 ### XAML AST Infrastructure
-- `src/DiagnosticsTools/DiagnosticsTools/Diagnostics/Xaml` contains the XML-backed AST stack:
+- `src/DiagnosticsTools/Diagnostics/Xaml` contains the XML-backed AST stack:
   - `XamlAstWorkspace` caches parsed documents and exposes events for mutations.
   - `XmlParserXamlAstProvider` handles on-disk file watching, encoding detection, SHA-256 versioning, incremental caching, and uses `Microsoft.Language.Xml` to parse documents and collect diagnostics via `XamlDiagnosticMapper`.
   - `XamlAstIndex`, `XamlAstNodeDiffer`, `XamlAstDocument`, and related descriptor types drive lookups for bindings, styles, and named elements.
@@ -86,7 +86,7 @@
 ## Extraction Steps
 
 1. [x] **Preparation**
-   - [x] Create solution folders `src/SourceNavigation` and `src/XamlAst` with new SDK-style class library projects targeting the same TFMs as `DiagnosticsTools`.
+   - [x] Create solution folders `src/DiagnosticsTools.SourceNavigation` and `src/DiagnosticsTools.XamlAst` with new SDK-style class library projects targeting the same TFMs as `DiagnosticsTools`.
    - [x] Update `DiagnosticsTools.sln` to include the new projects and reference shared `Directory.Build.props`.
    - [x] Decide on namespace casing (`DiagnosticsTools.SourceNavigation`, `DiagnosticsTools.XamlAst`) and confirm package IDs (open question).
 

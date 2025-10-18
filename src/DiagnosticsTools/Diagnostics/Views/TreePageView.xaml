@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             xmlns:controls="clr-namespace:Avalonia.Diagnostics.Controls;assembly=DiagnosticsTools"
+             xmlns:virtualizedTreeView="clr-namespace:Avalonia.Diagnostics.Controls.VirtualizedTreeView;assembly=DiagnosticsTools.VirtualizedTreeView"
+             xmlns:converters="clr-namespace:Avalonia.Diagnostics.Converters;assembly=DiagnosticsTools.Core"
+             x:Class="Avalonia.Diagnostics.Views.TreePageView"
+             x:DataType="vm:TreePageViewModel"
+             x:CompileBindings="True">
+  <UserControl.Resources>
+    <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
+  </UserControl.Resources>
+  <Grid ColumnDefinitions="0.35*,4,0.65*">
+    <Grid RowDefinitions="Auto,*">
+      <Grid Grid.Row="0"
+            Margin="0,0,0,4"
+            ColumnDefinitions="*,Auto"
+            ColumnSpacing="6">
+        <controls:FilterTextBox Grid.Column="0"
+                                DataContext="{Binding TreeFilter}"
+                                Text="{Binding FilterString}"
+                                Watermark="Search tree"
+                                UseCaseSensitiveFilter="{Binding UseCaseSensitiveFilter}"
+                                UseWholeWordFilter="{Binding UseWholeWordFilter}"
+                                UseRegexFilter="{Binding UseRegexFilter}" />
+
+        <Button Grid.Column="1"
+                Width="28"
+                Height="28"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                ToolTip.Tip="Search options">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <StackPanel MinWidth="180"
+                          Margin="10"
+                          Spacing="8">
+                <TextBlock Text="Search target"
+                           FontWeight="SemiBold" />
+                <StackPanel Spacing="4">
+                  <RadioButton Content="Type name"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.TypeName}}" />
+                  <RadioButton Content="Classes"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.Classes}}" />
+                  <RadioButton Content="Name"
+                               IsChecked="{Binding SelectedTreeSearchField, Converter={StaticResource EnumToCheckedConverter}, ConverterParameter={x:Static vm:TreeSearchField.Name}}" />
+                </StackPanel>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+          <TextBlock Text="⚙️"
+                     FontSize="16"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+        </Button>
+      </Grid>
+
+  <virtualizedTreeView:VirtualizedTreeView Grid.Row="1"
+                   Name="tree"
+                   BorderThickness="0"
+                   ItemsSource="{Binding Nodes}"
+                   SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
+                   PointerMoved="UpdateAdorner"
+                   PointerExited="RemoveAdorner">
+      <virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
+        <DataTemplate x:DataType="vm:TreeNode">
+          <Border Tag="{Binding IsMultiSelected}">
+            <Border.Styles>
+              <Style Selector="Border[Tag=True]">
+                <Setter Property="Background" Value="{DynamicResource ThemeAccentBrush}"/>
+                <Setter Property="Opacity" Value="0.15"/>
+              </Style>
+            </Border.Styles>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <StackPanel.Styles>
+                <Style Selector="StackPanel[Tag=True]">
+                  <Setter Property="Opacity" Value="0.5"/>
+                </Style>
+              </StackPanel.Styles>
+              <StackPanel.Tag>
+                <Binding Path="IsInTemplate" FallbackValue="False"/>
+              </StackPanel.Tag>
+              <TextBlock Text="{Binding Type}" FontWeight="{Binding FontWeight}"/>
+              <TextBlock Text="SRC"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         IsVisible="{Binding HasSource}"
+                         ToolTip.Tip="{Binding SourceSummary}"/>
+              <TextBlock Text="{Binding Classes}"/>
+              <TextBlock Foreground="Gray" Text="{Binding ElementName}"/>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </virtualizedTreeView:VirtualizedTreeView.ItemTemplate>
+      <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+        <MenuFlyout>
+          <MenuItem Header="Preview source"
+                    Command="{Binding PreviewSourceCommand}"
+                    IsEnabled="{Binding CanPreviewSource}" />
+          <MenuItem Header="Navigate to source"
+                    Command="{Binding NavigateToSourceCommand}"
+                    IsEnabled="{Binding CanNavigateToSource}" />
+          <MenuItem Header="Delete node"
+                    Command="{Binding DeleteNodeCommand}"
+                    IsEnabled="{Binding CanDeleteNode}" />
+          <MenuItem Header="Edit template (live preview)"
+                    Command="{Binding EditTemplateCommand}"
+                    IsEnabled="{Binding CanEditTemplate}" />
+          <MenuItem Header="Add to multi-selection"
+                    Command="{Binding AddToMultiSelectionCommand}"
+                    IsEnabled="{Binding CanAddToMultiSelection}" />
+          <MenuItem Header="Remove from multi-selection"
+                    Command="{Binding RemoveFromMultiSelectionCommand}"
+                    IsEnabled="{Binding CanRemoveFromMultiSelection}" />
+          <MenuItem Header="Clear multi-selection"
+                    Command="{Binding ClearMultiSelectionCommand}"
+                    IsEnabled="{Binding HasMultiSelection}" />
+          <MenuItem Header="Copy">
+            <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
+            <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
+          </MenuItem>
+          <MenuItem Header="Copy subtree XAML"
+                    IsEnabled="{Binding CanCopySubtree}"
+                    Click="CopySubtreeClick" />
+          <MenuItem Header="Paste subtree as child"
+                    IsEnabled="{Binding CanPasteSubtree}"
+                    Click="PasteSubtreeChildClick" />
+          <MenuItem Header="Paste subtree as sibling"
+                    IsEnabled="{Binding CanPasteSubtree}"
+                    Click="PasteSubtreeSiblingClick" />
+          <MenuItem Header="-" />
+          <MenuItem Header="Scope to this subtree"
+                    Command="{Binding ScopeToSubTree}"
+                    IsEnabled="{Binding CanScopeToSubTree}" />
+          <MenuItem Header="Show full tree"
+                    Command="{Binding ShowFullTree}"
+                    IsEnabled="{Binding CanShowFullTree}" />
+          <MenuItem Header="-" />
+          <MenuItem Header="Expand all" Command="{Binding ExpandAll}" />
+          <MenuItem Header="Collapse all" Command="{Binding CollapseAll}" />
+          <MenuItem Header="-" />
+          <MenuItem Header="Expand recursively" Command="{Binding ExpandRecursively}" />
+          <MenuItem Header="Collapse children" Command="{Binding CollapseChildren}" />
+          <MenuItem Header="Capture node screenshot" Command="{Binding CaptureNodeScreenshot}" />
+          <MenuItem Header="Bring into view" Command="{Binding BringIntoView}" />
+          <MenuItem Header="Focus" Command="{Binding Focus}" />
+        </MenuFlyout>
+      </virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+      </virtualizedTreeView:VirtualizedTreeView>
+    </Grid>
+
+    <GridSplitter Background="{DynamicResource ThemeControlMidBrush}" Width="1" Grid.Column="1"/>
+    <ContentControl Content="{Binding Details}" Grid.Column="2"/>
+  </Grid>
+</UserControl>

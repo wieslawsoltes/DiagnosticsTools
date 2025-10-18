@@ -31,13 +31,14 @@ Portions of the code were ported from the Avalonia Diagnostics tooling in the Av
 
 DiagnosticsTools now ships a suite of standalone libraries that can be reused outside the DevTools application. Most packages target `netstandard2.0`, `net6.0`, and `net8.0`.
 
-- [`DiagnosticsTools.Core`](./src/Core/DiagnosticsTools.Core/README.md) – Shared converters, visual helpers, and utility extensions consumed across the tooling stack.
-- [`DiagnosticsTools.PropertyEditing`](./src/PropertyEditing/DiagnosticsTools.PropertyEditing/README.md) – XAML mutation orchestration, telemetry hooks, and guard helpers used by the property inspector (`net6.0`/`net8.0`).
-- [`DiagnosticsTools.Runtime`](./src/Runtime/DiagnosticsTools.Runtime/README.md) – Runtime undo/redo coordinator and tree abstractions for hot reload scenarios.
-- [`DiagnosticsTools.Input`](./src/Input/DiagnosticsTools.Input/README.md) – Reusable hot key configuration and behaviours.
-- [`DiagnosticsTools.Screenshots`](./src/Screenshots/DiagnosticsTools.Screenshots/README.md) – Screenshot handler interfaces and default file picker implementation.
-- [`DiagnosticsTools.SourceNavigation`](./src/SourceNavigation/DiagnosticsTools.SourceNavigation/README.md) – Portable PDB + SourceLink resolution with high-level helpers such as `SourceInfoResolver` and `XamlSourceResolver`.
-- [`DiagnosticsTools.XamlAst`](./src/XamlAst/DiagnosticsTools.XamlAst/README.md) – A lightweight XAML workspace that indexes documents, raises change notifications, and surfaces diagnostic information.
+- [`DiagnosticsTools.Core`](./src/DiagnosticsTools.Core/README.md) – Shared converters, visual helpers, and utility extensions consumed across the tooling stack.
+- [`DiagnosticsTools.PropertyEditing`](./src/DiagnosticsTools.PropertyEditing/README.md) – XAML mutation orchestration, telemetry hooks, and guard helpers used by the property inspector (`net6.0`/`net8.0`).
+- [`DiagnosticsTools.Runtime`](./src/DiagnosticsTools.Runtime/README.md) – Runtime undo/redo coordinator and tree abstractions for hot reload scenarios.
+- [`DiagnosticsTools.Input`](./src/DiagnosticsTools.Input/README.md) – Reusable hot key configuration and behaviours.
+- [`DiagnosticsTools.VirtualizedTreeView`](./src/DiagnosticsTools.VirtualizedTreeView/README.md) – Virtualized tree view control, item container, and supporting helpers.
+- [`DiagnosticsTools.Screenshots`](./src/DiagnosticsTools.Screenshots/README.md) – Screenshot handler interfaces and default file picker implementation.
+- [`DiagnosticsTools.SourceNavigation`](./src/DiagnosticsTools.SourceNavigation/README.md) – Portable PDB + SourceLink resolution with high-level helpers such as `SourceInfoResolver` and `XamlSourceResolver`.
+- [`DiagnosticsTools.XamlAst`](./src/DiagnosticsTools.XamlAst/README.md) – A lightweight XAML workspace that indexes documents, raises change notifications, and surfaces diagnostic information.
 
 ### Referencing from your project
 
@@ -46,7 +47,7 @@ dotnet add package DiagnosticsTools.SourceNavigation
 dotnet add package DiagnosticsTools.XamlAst
 ```
 
-If you prefer to reference local projects instead (for example when contributing to DiagnosticsTools), add project references to `src/SourceNavigation/DiagnosticsTools.SourceNavigation.csproj` and `src/XamlAst/DiagnosticsTools.XamlAst.csproj` in your application.
+If you prefer to reference local projects instead (for example when contributing to DiagnosticsTools), add project references to `src/DiagnosticsTools.SourceNavigation/DiagnosticsTools.SourceNavigation.csproj` and `src/DiagnosticsTools.XamlAst/DiagnosticsTools.XamlAst.csproj` in your application.
 
 ```csharp
 using Avalonia.Diagnostics.SourceNavigation;
@@ -70,6 +71,10 @@ See the [sample project](./samples/DiagnosticsToolsSample) for an example of how
 ```bash
 dotnet build DiagnosticsTools.sln
 ```
+
+## Testing
+- Run `dotnet test DiagnosticsTools.sln` to execute the full suite.
+- Focused runs can target the matching test projects under `tests/DiagnosticsTools.Core.Tests`, `tests/DiagnosticsTools.Input.Tests`, `tests/DiagnosticsTools.PropertyEditing.Tests`, `tests/DiagnosticsTools.Runtime.Tests`, `tests/DiagnosticsTools.Screenshots.Tests`, or `tests/DiagnosticsTools.SourceNavigation.Tests`.
 
 ## Attribution
 

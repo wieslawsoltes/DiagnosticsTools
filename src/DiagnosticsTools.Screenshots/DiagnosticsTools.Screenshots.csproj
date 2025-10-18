@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.Screenshots</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.Screenshots</RootNamespace>
+    <PackageId>DiagnosticsTools.Screenshots</PackageId>
+    <Description>Screenshot capture helpers extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;screenshot</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+</Project>

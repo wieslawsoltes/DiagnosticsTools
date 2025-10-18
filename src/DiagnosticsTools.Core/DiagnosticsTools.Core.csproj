@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.Core</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics</RootNamespace>
+    <PackageId>DiagnosticsTools.Core</PackageId>
+    <Description>Shared utility helpers used across DiagnosticsTools packages.</Description>
+    <PackageTags>avalonia;diagnostics;utilities</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="IgnoresAccessChecksToGenerator" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <IgnoresAccessChecksTo Include="Avalonia.Base" />
+    <IgnoresAccessChecksTo Include="Avalonia.Controls" />
+    <IgnoresAccessChecksTo Include="Avalonia.Visuals" />
+  </ItemGroup>
+
+</Project>

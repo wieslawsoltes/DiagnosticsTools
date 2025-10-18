@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.VirtualizedTreeView</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.Controls</RootNamespace>
+    <PackageId>DiagnosticsTools.VirtualizedTreeView</PackageId>
+    <Description>Virtualized tree view control extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;treeview;virtualized</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+</Project>

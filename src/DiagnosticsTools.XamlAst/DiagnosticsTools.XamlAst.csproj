@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.XamlAst</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.Xaml</RootNamespace>
+    <PackageId>DiagnosticsTools.XamlAst</PackageId>
+    <Description>Reusable XAML workspace, diagnostics, and indexing utilities extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;xaml;workspace</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="GuiLabs.Language.Xml" />
+    <PackageReference Include="System.Buffers" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" />
+  </ItemGroup>
+</Project>

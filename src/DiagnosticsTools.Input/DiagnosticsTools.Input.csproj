@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.Input</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.Input</RootNamespace>
+    <PackageId>DiagnosticsTools.Input</PackageId>
+    <Description>Hot key configuration and behaviours extracted from DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;hotkeys;input</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="IgnoresAccessChecksToGenerator" PrivateAssets="all" />
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <IgnoresAccessChecksTo Include="Avalonia.Base" />
+  </ItemGroup>
+
+</Project>

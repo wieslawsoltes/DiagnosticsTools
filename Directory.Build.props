@@ -1,6 +1,35 @@
 <Project>
- <PropertyGroup>
+  <PropertyGroup>
     <Deterministic>true</Deterministic>
     <LangVersion>latest</LangVersion>
- </PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_NormalizedProjectDir>$([System.String]::Copy('$(MSBuildProjectDirectory)')).Replace('\','/')</_NormalizedProjectDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_NormalizedProjectDir)' != '' and $(_NormalizedProjectDir.Contains('/src/DiagnosticsTools.'))">
+    <TargetFrameworks Condition="'$(TargetFrameworks)' == ''">net8.0;net6.0;netstandard2.0</TargetFrameworks>
+    <ImplicitUsings Condition="'$(ImplicitUsings)' == ''">disable</ImplicitUsings>
+    <Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+    <IsPackable Condition="'$(IsPackable)' == ''">true</IsPackable>
+    <Authors Condition="'$(Authors)' == ''">Wieslaw Soltes</Authors>
+    <Company Condition="'$(Company)' == ''">Wieslaw Soltes</Company>
+    <RepositoryUrl Condition="'$(RepositoryUrl)' == ''">https://github.com/AvaloniaUI/DiagnosticsTools</RepositoryUrl>
+    <RepositoryType Condition="'$(RepositoryType)' == ''">git</RepositoryType>
+    <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''">https://github.com/AvaloniaUI/DiagnosticsTools</PackageProjectUrl>
+    <PackageLicenseExpression Condition="'$(PackageLicenseExpression)' == ''">MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile Condition="'$(GenerateDocumentationFile)' == ''">true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_NormalizedProjectDir)' != '' and $(_NormalizedProjectDir.Contains('/src/DiagnosticsTools.'))">
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+  </ItemGroup>
 </Project>

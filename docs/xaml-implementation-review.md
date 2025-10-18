@@ -8,11 +8,11 @@
 ## Findings
 
 1. [x] **High – Property inspector mutation baselines are not thread-safe**  
-   - **Resolution**: `PropertyInspectorChangeEmitter` now synchronizes `_mutationOrigins` and `_pendingMutationInvalidations` via dedicated locks and helper methods when tracking pending invalidations, extending suppression windows, or refreshing baselines (`src/DiagnosticsTools/DiagnosticsTools/Diagnostics/PropertyEditing/PropertyInspectorChangeEmitter.cs:41-44`, `117-148`, `245-288`, `639-678`, `862-877`, `1066-1074`). Workspace-driven invalidations share the same guards, eliminating cross-thread dictionary mutations raised by `XmlParserXamlAstProvider` (`src/DiagnosticsTools/DiagnosticsTools/Diagnostics/Xaml/XmlParserXamlAstProvider.cs:200-299`).  
+   - **Resolution**: `PropertyInspectorChangeEmitter` now synchronizes `_mutationOrigins` and `_pendingMutationInvalidations` via dedicated locks and helper methods when tracking pending invalidations, extending suppression windows, or refreshing baselines (`src/DiagnosticsTools/Diagnostics/PropertyEditing/PropertyInspectorChangeEmitter.cs:41-44`, `117-148`, `245-288`, `639-678`, `862-877`, `1066-1074`). Workspace-driven invalidations share the same guards, eliminating cross-thread dictionary mutations raised by `XmlParserXamlAstProvider` (`src/DiagnosticsTools/Diagnostics/Xaml/XmlParserXamlAstProvider.cs:200-299`).  
    - **Next steps**: Add regression coverage that simulates simultaneous watcher + inspector updates to guard against future regressions.
 
 2. [ ] **High – File persistence drops the original encoding**  
-   - **What & where**: `WriteDocumentAsync` always recreates the file using `new UTF8Encoding(false)` (`src/DiagnosticsTools/DiagnosticsTools/Diagnostics/PropertyEditing/XamlMutationDispatcher.cs:435-449`).  
+   - **What & where**: `WriteDocumentAsync` always recreates the file using `new UTF8Encoding(false)` (`src/DiagnosticsTools/Diagnostics/PropertyEditing/XamlMutationDispatcher.cs:435-449`).  
    - **Why it matters**: Projects that rely on BOMs or non-UTF8 encodings will silently lose them after an inspector edit, causing diffs, build pipeline regressions, or outright parse failures. The plan calls for “preserving formatting fidelity,” which includes encoding.  
    - **Recommendation**: Capture the source encoding when the document is loaded (e.g., expose it on `XamlAstDocument`) and re-use it on write. If the encoding cannot be determined, fall back to UTF-8 but surface a warning/telemetry. Extend tests to cover BOM and non-UTF8 scenarios.
 

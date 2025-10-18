@@ -1,0 +1,32 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:Avalonia.Diagnostics.Views;assembly=DiagnosticsTools"
+        xmlns:diag="clr-namespace:Avalonia.Diagnostics;assembly=DiagnosticsTools"
+        xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+        Title="Avalonia DevTools"
+        x:Class="Avalonia.Diagnostics.Views.MainWindow"
+        x:DataType="viewModels:MainViewModel"
+        x:CompileBindings="True">
+  <Window.DataTemplates>
+    <diag:ViewLocator/>
+  </Window.DataTemplates>
+
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://DiagnosticsTools.VirtualizedTreeView/Controls/VirtualizedTreeView/VirtualizedTreeViewItem.axaml" />
+        <ResourceInclude Source="avares://DiagnosticsTools.VirtualizedTreeView/Controls/VirtualizedTreeView/VirtualizedTreeView.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
+
+  <Window.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+    <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
+    <StyleInclude Source="avares://DiagnosticsTools/Diagnostics/Controls/ThicknessEditor.axaml" />
+    <StyleInclude Source="avares://DiagnosticsTools/Diagnostics/Controls/FilterTextBox.axaml" />
+    <StyleInclude Source="avares://DiagnosticsTools/Diagnostics/Controls/BrushEditor.axaml" />
+  </Window.Styles>
+  <views:MainView/>
+</Window>

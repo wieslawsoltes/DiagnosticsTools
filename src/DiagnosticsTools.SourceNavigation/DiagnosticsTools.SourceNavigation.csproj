@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>DiagnosticsTools.SourceNavigation</AssemblyName>
+    <RootNamespace>Avalonia.Diagnostics.SourceNavigation</RootNamespace>
+    <PackageId>DiagnosticsTools.SourceNavigation</PackageId>
+    <Description>Portable PDB + SourceLink resolution helpers used by DiagnosticsTools.</Description>
+    <PackageTags>avalonia;diagnostics;pdb;sourcelink;xaml</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Reflection.Metadata" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" />
+  </ItemGroup>
+</Project>

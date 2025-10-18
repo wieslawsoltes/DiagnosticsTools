@@ -7,20 +7,21 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/DiagnosticsTools/DiagnosticsTools/DiagnosticsTools.csproj" />
-    <ProjectReference Include="../../src/SourceNavigation/DiagnosticsTools.SourceNavigation/DiagnosticsTools.SourceNavigation.csproj" />
-    <ProjectReference Include="../../src/XamlAst/DiagnosticsTools.XamlAst/DiagnosticsTools.XamlAst.csproj" />
+    <ProjectReference Include="../../src/DiagnosticsTools/DiagnosticsTools.csproj" />
+    <ProjectReference Include="../../src/DiagnosticsTools.SourceNavigation/DiagnosticsTools.SourceNavigation.csproj" />
+    <ProjectReference Include="../../src/DiagnosticsTools.XamlAst/DiagnosticsTools.XamlAst.csproj" />
+    <ProjectReference Include="../../src/DiagnosticsTools.VirtualizedTreeView/DiagnosticsTools.VirtualizedTreeView.csproj" />
     <ProjectReference Include="../../samples/DiagnosticsToolsSample/DiagnosticsToolsSample.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.*" />
-    <PackageReference Include="Avalonia.Headless" Version="11.*" />
-    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.*" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
-    <PackageReference Include="xunit" Version="2.8.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.0" PrivateAssets="All" />
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="All" />
   </ItemGroup>
 </Project>
