@@ -18,7 +18,7 @@
 1. **DiagnosticsTools.PropertyEditing**
    - `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationEditBuilder`, `XamlMutationJournal`, `MutationTelemetry`, guard utilities.
    - Public surface aimed at mutation orchestration and mutation event notifications.
-   - Depends on `DiagnosticsTools.XamlAst` for indexing and optionally on metrics abstractions.
+   - Depends on `DiagnosticsTools.XamlAst` for indexing and uses optional telemetry hooks.
 
 2. **DiagnosticsTools.Runtime**
    - `RuntimeMutationCoordinator`, runtime attach/detach helpers, DevTools host convenience APIs.
@@ -93,7 +93,7 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 ### Property Editing Package
 - **Interfaces**
   - `IPropertyMutationService` – central entry point for apply/preview operations. Methods: `ValueTask<MutationResult> ApplyAsync(PropertyMutationRequest request, CancellationToken)`, `ValueTask<MutationPreview> PreviewAsync(PropertyMutationRequest request, CancellationToken)`.
-  - `IMutationInstrumentation` – abstraction for metrics/logging hooks (`RecordMutation`, `RecordAstReload`, `RecordAstIndexBuild`).
+  - `IMutationInstrumentation` – abstraction for telemetry/logging hooks (`RecordMutation`, `RecordAstReload`, `RecordAstIndexBuild`).
   - `IPropertyMutationOriginStore` – optional persistence for mutation origins and suppression windows.
   - `IXamlMutationWorkspaceFactory` – factory to create/configure XAML workspaces used during mutations.
 - **Data Contracts**
@@ -184,7 +184,7 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 3. [x] Scaffold new class library projects with packaging metadata.
 4. [x] Extract property editing infrastructure and adapt DevTools UI.
 5. [x] Extract runtime + hotkey helpers and adapt DevTools UI.
-6. [x] Extract screenshot and metrics utilities.
+6. [x] Extract screenshot utilities.
 7. [x] Migrate shared converters/extensions to a core utilities package.
 8. [x] Update DevTools project references and clean up obsolete code paths.
 9. [x] Expand unit/integration tests for each new package.
