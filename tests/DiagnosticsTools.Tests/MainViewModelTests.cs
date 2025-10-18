@@ -1,7 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Diagnostics;
 using Avalonia.Diagnostics.ViewModels;
-using Avalonia.Diagnostics.ViewModels.Metrics;
 using Avalonia.Headless.XUnit;
 using Xunit;
 
@@ -31,11 +30,11 @@ namespace DiagnosticsTools.Tests
 
             viewModel.SetOptions(new DevToolsOptions
             {
-                LaunchView = DevToolsViewKind.Metrics
+                LaunchView = DevToolsViewKind.Events
             });
 
-            Assert.Equal(4, viewModel.SelectedTab);
-            Assert.IsType<MetricsPageViewModel>(viewModel.Content);
+            Assert.Equal(3, viewModel.SelectedTab);
+            Assert.IsType<EventsPageViewModel>(viewModel.Content);
         }
 
         [AvaloniaFact]

@@ -11,10 +11,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
         {
         }
 
-        public void RecordAstReload(TimeSpan duration, string scope, bool cacheHit) =>
-            MutationInstrumentation.RecordAstReload(duration, scope, cacheHit);
+        public void RecordAstReload(TimeSpan duration, string scope, bool cacheHit)
+        {
+        }
 
-        public void RecordAstIndexBuild(TimeSpan duration, string scope, bool cacheHit) =>
-            MutationInstrumentation.RecordAstIndexBuild(duration, scope, cacheHit);
+        public void RecordAstIndexBuild(TimeSpan duration, string scope, bool cacheHit)
+        {
+        }
     }
 }

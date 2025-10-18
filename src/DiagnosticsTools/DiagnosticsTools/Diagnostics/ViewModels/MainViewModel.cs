@@ -11,10 +11,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Media;
-using Avalonia.Diagnostics.Metrics;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.SourceNavigation;
-using Avalonia.Diagnostics.ViewModels.Metrics;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Diagnostics.Runtime;
 using Microsoft.CodeAnalysis;
@@ -31,8 +29,6 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly CombinedTreePageViewModel _combinedTree;
         private readonly EventsPageViewModel _events;
         private readonly HotKeyPageViewModel _hotKeys;
-        private readonly MetricsListenerService _metricsListener;
-        private readonly MetricsPageViewModel _metrics;
         private readonly IDisposable _pointerOverSubscription;
         private readonly XamlMutationDispatcher _mutationDispatcher;
         private readonly DelegateCommand _undoMutationCommand;
@@ -115,8 +111,6 @@ namespace Avalonia.Diagnostics.ViewModels
                 ref _visualTreeScopeHandler);
             _events = new EventsPageViewModel(this);
             _hotKeys = new HotKeyPageViewModel();
-            _metricsListener = new MetricsListenerService();
-            _metrics = new MetricsPageViewModel(_metricsListener);
 
             UpdateFocusedControl();
 
@@ -299,9 +293,6 @@ namespace Avalonia.Diagnostics.ViewModels
                         Content = _events;
                         break;
                     case 4:
-                        Content = _metrics;
-                        break;
-                    case 5:
                         Content = _hotKeys;
                         break;
                     default:
@@ -379,8 +370,6 @@ namespace Avalonia.Diagnostics.ViewModels
             _visualTree.Dispose();
             _combinedTree.Dispose();
             _xamlAstWorkspace.Dispose();
-            _metrics.Dispose();
-            _metricsListener.Dispose();
             _currentFocusHighlightAdorner?.Dispose();
             lock (_sourcePreviewGate)
             {
@@ -841,7 +830,6 @@ namespace Avalonia.Diagnostics.ViewModels
             DevToolsViewKind.LogicalTree => 1,
             DevToolsViewKind.VisualTree => 2,
             DevToolsViewKind.Events => 3,
-            DevToolsViewKind.Metrics => 4,
             _ => 0,
         };
     }

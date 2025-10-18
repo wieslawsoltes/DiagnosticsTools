@@ -48,7 +48,6 @@
     <ProjectReference Include="..\..\Runtime\DiagnosticsTools.Runtime\DiagnosticsTools.Runtime.csproj" />
     <ProjectReference Include="..\..\Input\DiagnosticsTools.Input\DiagnosticsTools.Input.csproj" />
     <ProjectReference Include="..\..\Screenshots\DiagnosticsTools.Screenshots\DiagnosticsTools.Screenshots.csproj" />
-    <ProjectReference Include="..\..\Metrics\DiagnosticsTools.Metrics\DiagnosticsTools.Metrics.csproj" />
     <ProjectReference Include="..\..\Core\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
   </ItemGroup>
 

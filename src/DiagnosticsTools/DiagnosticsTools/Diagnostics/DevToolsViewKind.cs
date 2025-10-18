@@ -21,8 +21,4 @@ public enum DevToolsViewKind
     /// Combined logical/visual tree diagnostic view
     /// </summary>
     CombinedTree = 3,
-    /// <summary>
-    /// Metrics diagnostic view
-    /// </summary>
-    Metrics = 4,
 }

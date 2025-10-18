@@ -20,7 +20,7 @@ var emitter = new PropertyInspectorChangeEmitter(dispatcher);
 
 - `PropertyInspectorChangeEmitter` – composes mutation envelopes and raises completion events.
 - `XamlMutationDispatcher` – applies serialized edits to XAML documents.
-- `MutationTelemetry` / `MutationInstrumentation` – hooks for instrumentation sinks.
+- `MutationTelemetry` – optional hooks for registering telemetry sinks.
 
 ## Upgrade Notes
 

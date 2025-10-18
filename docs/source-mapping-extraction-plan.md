@@ -25,7 +25,7 @@
   - `XmlParserXamlAstProvider` handles on-disk file watching, encoding detection, SHA-256 versioning, incremental caching, and uses `Microsoft.Language.Xml` to parse documents and collect diagnostics via `XamlDiagnosticMapper`.
   - `XamlAstIndex`, `XamlAstNodeDiffer`, `XamlAstDocument`, and related descriptor types drive lookups for bindings, styles, and named elements.
 - Property editing components (`Diagnostics/PropertyEditing/*`) depend heavily on the AST (e.g., `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationJournal`).
-- Instrumentation hooks (`MutationInstrumentation`) currently reside in `Diagnostics/PropertyEditing` but are invoked from both `XamlAstWorkspace` and `XmlParserXamlAstProvider`.
+- Instrumentation hooks (formerly `MutationInstrumentation`, now a no-op adapter) currently reside in `Diagnostics/PropertyEditing` but are invoked from both `XamlAstWorkspace` and `XmlParserXamlAstProvider`.
 
 ### Shared Touchpoints
 - `SourceInfoService` bridges the two concerns by loading XAML documents (from local files, AVR resources, or SourceLink endpoints) and mapping logical tree paths to XML nodes.
@@ -61,7 +61,7 @@
 **Responsibilities**
 - Provide the XML-based AST, indexing, diagnostics, and incremental change tracking for XAML files.
 - Surface a file-system backed implementation (`XmlParserXamlAstProvider`) and allow alternative providers (e.g., language server).
-- Offer instrumentation extension points instead of hard dependencies on `MutationInstrumentation`.
+- Offer instrumentation extension points that default to no-op telemetry, avoiding hard dependencies on DevTools-specific sinks.
 
 **Public Surface (initial proposal)**
 - `XamlAstWorkspace`, `XamlAstDocument`, `XamlDocumentVersion`.
@@ -71,7 +71,7 @@
 **Internal Organisation**
 - Retain parsing and diffing logic but relocate file watching, caching, and SHA-256 checksum routines into internal helpers.
 - Isolate encoding detection and XML parsing utilities for reuse.
-- Provide adapters in the DiagnosticsTools app to forward instrumentation events to `MutationInstrumentation`.
+- Provide adapters in the DiagnosticsTools app to route instrumentation events to `MutationTelemetry` (or remain no-op when telemetry is disabled).
 
 **Dependencies**
 - `Microsoft.Language.Xml`, `System.IO.Abstractions` (optional for testing), `Avalonia.Utilities` only where unavoidable (e.g., `StopwatchHelper` — consider replacing with BCL).
@@ -93,7 +93,7 @@
 2. [x] **Refine Current Contracts**
    - [x] Introduce `ISourceInfoResolver` (app project) mirroring `ISourceInfoService` but omitting Avalonia-specific overloads; add adapters so existing callers compile.
    - [x] Define `IXamlDocumentLocator` and `ILogicalTreePathBuilder` interfaces to separate logical tree traversal from document lookup.
-   - [x] Draft `IXamlAstInstrumentation` with methods used today (`RecordAstReload`, `RecordAstIndexBuild`) and provide a diagnostics app implementation that forwards to `MutationInstrumentation`.
+   - [x] Draft `IXamlAstInstrumentation` with methods used today (`RecordAstReload`, `RecordAstIndexBuild`) and provide a diagnostics app implementation that can forward to telemetry sinks.
 
 3. [ ] **Extract Source Navigation Library**
    - [x] Move `SourceInfo`, `PortablePdbResolver`, `SourceLinkMap` into the new project; adjust namespaces and access modifiers to make them public/internal as required.
@@ -106,7 +106,7 @@
 
 4. [ ] **Extract XAML AST Library**
    - [x] Relocate the entire `Diagnostics/Xaml` folder to the new project, adjusting namespaces.
-   - [x] Replace direct calls to `MutationInstrumentation` with the injected `IXamlAstInstrumentation`.
+   - [x] Replace direct instrumentation calls with the injected `IXamlAstInstrumentation` facade.
    - [x] Audit usages of `Avalonia.Utilities.StopwatchHelper` and either re-export minimal helpers or reimplement with `Stopwatch`.
    - [x] Ensure the provider no longer touches app-level singletons (e.g., remove implicit dependencies on `AvaloniaLocator`; the workspace should accept services via constructor).
    - [x] Add focused tests:
@@ -119,7 +119,7 @@
    - [x] Implement `ISourceInfoService` as an adapter that composes:
      - [x] `SourceInfoResolver` from library A.
      - [x] `XamlAstWorkspace`-backed implementation of `IXamlDocumentLocator`.
-   - [x] Provide an instrumentation adapter that implements `IXamlAstInstrumentation` and delegates to `MutationInstrumentation` (placed in `Diagnostics/PropertyEditing`).
+   - [x] Provide an instrumentation adapter that implements `IXamlAstInstrumentation` and defaults to telemetry/no-op behaviour (placed in `Diagnostics/PropertyEditing`).
    - [x] Update view models and views to consume the adapters; ensure DI factories (`MainWindow.xaml.cs:369`) create the new resolver instead of the old `SourceInfoService`.
    - [x] Remove obsolete internal classes (`SourceInfoService.XamlDocument`, etc.) once adapters are wired.
 
@@ -138,7 +138,7 @@
 - **File watcher reliability:** Moving `XmlParserXamlAstProvider` could expose platform-specific watcher bugs; add integration tests using `FileSystemWatcher` and consider abstractions for unit tests.
 - **Remote SourceLink latency:** Centralising SourceLink HTTP fetch logic inside the library may require cancellation/timeout controls; expose `HttpMessageHandler` injection for testability.
 - **Binary compatibility:** Keep legacy namespaces or provide type-forwarders if external consumers already reference `Avalonia.Diagnostics.*` types.
-- **Instrumentation loss:** Without careful adapter wiring, metrics might stop emitting; ensure `IXamlAstInstrumentation` defaults to no-op but DiagnosticsTools provides real implementation.
+- **Instrumentation change:** Metrics instrumentation has been retired; ensure `IXamlAstInstrumentation` remains safe as a no-op and continues to support optional telemetry sinks.
 
 ## Open Questions / Follow-Ups
 - Confirm desired target frameworks for the new projects (match app or extend to netstandard2.0 for broader reuse?).

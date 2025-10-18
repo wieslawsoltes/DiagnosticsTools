@@ -18,7 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\XamlAst\DiagnosticsTools.XamlAst\DiagnosticsTools.XamlAst.csproj" />
-    <ProjectReference Include="..\..\Metrics\DiagnosticsTools.Metrics\DiagnosticsTools.Metrics.csproj" />
     <ProjectReference Include="..\..\Core\DiagnosticsTools.Core\DiagnosticsTools.Core.csproj" />
   </ItemGroup>
 

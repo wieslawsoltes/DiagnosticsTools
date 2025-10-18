@@ -10,14 +10,13 @@
 - **UI Shell** (`Views`, `ViewModels`, `Controls`, `Xaml`): Implements the DevTools window, tabs, previews, and interactions. Tight coupling to Avalonia UI objects and should remain in the application project.
 - **Property Editing** (`Diagnostics/PropertyEditing`): Contains mutation dispatch, journaling, guard utilities, and instrumentation. Depends on the XAML AST workspace and mutation instrumentation abstractions.
 - **Runtime & Hotkeys** (`Runtime`, `HotKeyConfiguration`, `Behaviors`): Runtime mutation coordinator, hot key binding helpers, and behaviours applied to tool windows. Mostly logic with minimal UI surface.
-- **Metrics & Telemetry** (`Diagnostics/Metrics`, `MutationTelemetry`, `MutationInstrumentation`): Metrics collection abstractions shared across property editing and potential future tooling.
 - **Common Utilities** (`Converters`, `VisualExtensions`, `VisualTreeDebug`, `Screenshots`, `KeyGestureExtensions`, `ViewLocator`, `TypeExtensions`): Reusable helpers not strictly tied to the DevTools UI but currently internal to the project.
 - **Source Navigation & XAML AST**: Already extracted to `DiagnosticsTools.SourceNavigation` and `DiagnosticsTools.XamlAst`.
 
 ## Candidate Libraries & Responsibilities
 
 1. **DiagnosticsTools.PropertyEditing**
-   - `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationEditBuilder`, `XamlMutationJournal`, `MutationInstrumentation`, `MutationTelemetry`, guard utilities.
+   - `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationEditBuilder`, `XamlMutationJournal`, `MutationTelemetry`, guard utilities.
    - Public surface aimed at mutation orchestration and mutation event notifications.
    - Depends on `DiagnosticsTools.XamlAst` for indexing and optionally on metrics abstractions.
 
@@ -32,26 +31,23 @@
 4. **DiagnosticsTools.Screenshots**
    - Screenshot abstractions (`IScreenshotHandler`, `Screenshots` folder). Potentially reusable for other tooling scenarios.
 
-5. **DiagnosticsTools.Metrics**
-   - Abstractions for metrics/telemetry (`Diagnostics/Metrics`, `MutationTelemetry`, instrumentation adapters). Can back optional instrumentation across multiple packages.
-
-6. **DiagnosticsTools.Core**
+5. **DiagnosticsTools.Core**
    - Shared utility layer (converters, visual extensions, visual tree debug helpers). Serves as a foundational package for non-UI logic.
 
 ## Dependency Inventory (Checklist Item 1)
 
 ### Property Editing (`Diagnostics/PropertyEditing`)
-- **Key Types:** `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationEditBuilder`, `XamlMutationJournal`, `XamlMutationDispatcher`, `MutationInstrumentation`, `MutationTelemetry`, `XamlGuardUtilities`, `XamlTextEdit`.
+- **Key Types:** `PropertyInspectorChangeEmitter`, `XamlMutationDispatcher`, `XamlMutationEditBuilder`, `XamlMutationJournal`, `XamlMutationDispatcher`, `MutationTelemetry`, `XamlGuardUtilities`, `XamlTextEdit`.
 - **Internal Dependencies:** 
   - `Avalonia.Diagnostics.Xaml` (`XamlAstWorkspace`, descriptors) for document/index access.
-  - `Avalonia.Diagnostics.PropertyEditing` metrics (`MutationInstrumentation`, `MutationTelemetry`), currently tightly coupled to `Diagnostics/Metrics`.
+  - `MutationTelemetry` infrastructure for optional mutation observers.
   - Dispatcher interactions rely on `Avalonia.Threading.Dispatcher.UIThread`.
-- **External Dependencies:** `System.Text.Json`, `Microsoft.Language.Xml`, `Avalonia` (data binding, markup extensions), `System.Diagnostics.Metrics`.
+- **External Dependencies:** `System.Text.Json`, `Microsoft.Language.Xml`, `Avalonia` (data binding, markup extensions).
 - **Consumers:** `MainViewModel`, `TreePageViewModel`, `ControlDetailsViewModel`, xUnit tests (`PropertyInspectorChangeEmitterTests`, `XamlMutationDispatcherTests`).
 - **Extraction Considerations:** 
   - Provide interfaces for mutation dispatching and mutation completion events (currently internal).
   - Replace direct `Dispatcher.UIThread` usage with delegate injection or an abstraction to avoid UI dependencies.
-  - Expose instrumentation hooks as optional to avoid forcing `DiagnosticsTools.Metrics` dependency in host apps.
+  - Ensure telemetry sinks remain optional attachments rather than hard dependencies.
 
 ### Runtime Mutation (`Diagnostics/Runtime/RuntimeMutationCoordinator`)
 - **Key Types:** `RuntimeMutationCoordinator` + nested mutations.
@@ -75,14 +71,6 @@
 - **Consumers:** `MainViewModel` (screenshot commands), `ScreenshotsPage`.
 - **Extraction Considerations:** Self-contained; easy to publish as a separate package once command plumbing is decoupled.
 
-### Metrics (`Diagnostics/Metrics`)
-- **Key Types:** `MetricsListenerService`, `DiagnosticInstrumentation`, `MetricIdentifiers`, `HistogramStats`, `ObservableGaugeSnapshot`.
-- **Dependencies:** `System.Diagnostics.Metrics`, `System.Diagnostics.ActivitySource`, `Avalonia.Threading` (dispatch back to UI thread).
-- **Consumers:** `MainViewModel` (metrics tab), property editing instrumentation (`MutationInstrumentation`).
-- **Extraction Considerations:** 
-  - Provide public service interfaces (`IMetricsListener`) so UI can subscribe without direct dependency on internal types.
-  - Determine if metrics should be optional (allow host apps to omit package).
-
 ### Shared Utilities (`Converters`, `VisualExtensions`, `VisualTreeDebug`, `TypeExtensions`, `ViewLocator`, etc.)
 - **Dependencies:** Core Avalonia types (`IControl`, `VisualTree`, `DataTemplates`).
 - **Consumers:** Multiple view models and views; broadly reusable.
@@ -97,7 +85,6 @@
 - `IPropertyMutationService`, `IMutationInstrumentation`, `IXamlAstWorkspaceFactory` to avoid new packages referencing the DevTools UI.
 - `IRuntimeMutationCoordinator`/`IMutableTreeNode` to decouple runtime undo/redo logic from view models.
 - `IScreenshotService` to expose screenshot operations without referencing DevTools commands directly.
-- `IMetricsListener` abstraction to opt-in to metrics UI.
 
 This dependency map satisfies checklist item 1 and informs the next steps for contract design and extraction sequencing.
 
@@ -144,14 +131,6 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 - **Data Contracts**
   - `ScreenshotContext` (target control, format, metadata).
 
-### Metrics Package
-- **Interfaces**
-  - `IMetricsListener` – subscribes to meter/activity sources, exposes snapshots and update events.
-  - `IMetricsSink` – consumer-side subscription interface used by UI.
-  - `IMetricsInstrumentation` – optional emitter interface other packages can use.
-- **Data Contracts**
-  - `HistogramSnapshot`, `GaugeSnapshot`, `ActivitySnapshot` (public variants of current internal types).
-
 ### Core Utilities Package
 - **Interfaces / Types**
   - Primarily static helper classes (`VisualTreeUtilities`, `TypeUtilities`, converters) with no DevTools dependencies.
@@ -159,17 +138,17 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 
 ### Bridging Strategy
 - DevTools application will provide concrete implementations/adapters for these interfaces while the new packages remain UI-agnostic.
-- Instrumentation is entirely optional: host applications can provide no-op implementations of `IMutationInstrumentation` or `IMetricsSink`.
+- Instrumentation is entirely optional: host applications can provide no-op implementations of `IMutationInstrumentation`.
 - Tests will target the new contracts directly, enabling package-level validation without spinning up the full DevTools UI.
 
 ## Proposed Refactoring Steps
 
 1. **Inventory & Dependency Mapping**
-   - Build a dependency graph for `PropertyEditing`, `Runtime`, `Screenshots`, `Metrics`, and common utilities.
+   - Build a dependency graph for `PropertyEditing`, `Runtime`, `Screenshots`, and common utilities.
    - Identify cross-references to UI components to determine required adapter layers.
 
 2. **Define Public API Contracts**
-   - Draft interfaces for mutation orchestration (`IPropertyMutationService`), runtime activation (`IDevToolsRuntimeCoordinator`), screenshot capture (`IScreenshotService`), and metrics hooks.
+   - Draft interfaces for mutation orchestration (`IPropertyMutationService`), runtime activation (`IDevToolsRuntimeCoordinator`), and screenshot capture (`IScreenshotService`).
    - Annotate internal-only code in the DevTools UI that will become consumers of the new packages.
 
 3. **Create New Class Library Projects**
@@ -179,7 +158,7 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
 4. **Incremental Code Migration**
    - Move property editing infrastructure first, introducing adapters in the DevTools UI to preserve behaviour.
    - Relocate runtime coordinator and hotkey utilities.
-   - Move screenshot and metrics helpers.
+   - Move screenshot helpers.
    - Migrate shared utilities last once upstream dependencies are resolved.
 
 5. **Update DevTools Application**
@@ -187,21 +166,21 @@ This dependency map satisfies checklist item 1 and informs the next steps for co
    - Ensure DI/initialisation pipeline uses the new abstractions (e.g., `PropertyInspectorChangeEmitter` from the property editing package).
 
 6. **Testing & Validation**
-   - Extend unit tests for each new package (mutation pipeline, runtime coordinator, screenshot provider, metrics).
-  - Run targeted DevTools integration tests and perform manual QA to confirm observed behaviour is unchanged.
-  - Dedicated test projects exist for `DiagnosticsTools.PropertyEditing`, `DiagnosticsTools.Runtime`, `DiagnosticsTools.Input`, `DiagnosticsTools.Screenshots`, `DiagnosticsTools.Metrics`, and `DiagnosticsTools.Core` to exercise the public contracts added during extraction.
-  - Provide headless harnesses/mocks (e.g., storage providers, timers, dispatcher adapters) so screenshot and hotkey tests can execute without UI dependencies.
+   - Extend unit tests for each new package (mutation pipeline, runtime coordinator, screenshot provider).
+   - Run targeted DevTools integration tests and perform manual QA to confirm observed behaviour is unchanged.
+   - Dedicated test projects exist for `DiagnosticsTools.PropertyEditing`, `DiagnosticsTools.Runtime`, `DiagnosticsTools.Input`, `DiagnosticsTools.Screenshots`, and `DiagnosticsTools.Core` to exercise the public contracts added during extraction.
+   - Provide headless harnesses/mocks (e.g., storage providers, timers, dispatcher adapters) so screenshot and hotkey tests can execute without UI dependencies.
 
 7. **Documentation & Packaging**
    - Update `README` sections for each package detailing install instructions, sample usage, and API surfaces.
    - Refresh the roadmap and plan once extraction is complete, capturing any follow-up tasks (e.g., cross-package instrumentation guidance).
    - Per-package upgrade notes now live alongside each library (`src/*/README.md`) describing how consumers transition from the monolithic `DiagnosticsTools` assembly.
-   - Add quick-start snippets demonstrating wiring for property editing, runtime undo/redo, hotkeys, metrics dashboards, and screenshot services in the host application's documentation.
+   - Add quick-start snippets demonstrating wiring for property editing, runtime undo/redo, hotkeys, and screenshot services in the host application's documentation.
 
 ## Checklist Roadmap
 
 1. [x] Produce detailed dependency map and list of public APIs for migration targets.
-2. [x] Define interfaces/contracts for mutation, runtime, screenshot, metrics, and utility packages.
+2. [x] Define interfaces/contracts for mutation, runtime, screenshot, and utility packages.
 3. [x] Scaffold new class library projects with packaging metadata.
 4. [x] Extract property editing infrastructure and adapt DevTools UI.
 5. [x] Extract runtime + hotkey helpers and adapt DevTools UI.

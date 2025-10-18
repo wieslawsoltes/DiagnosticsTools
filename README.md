@@ -29,14 +29,13 @@ Portions of the code were ported from the Avalonia Diagnostics tooling in the Av
 
 ## Reusable Libraries
 
-DiagnosticsTools now ships a suite of standalone libraries that can be reused outside the DevTools application. Most packages target `netstandard2.0`, `net6.0`, and `net8.0`; metrics-specific components now require `net6.0`/`net8.0`.
+DiagnosticsTools now ships a suite of standalone libraries that can be reused outside the DevTools application. Most packages target `netstandard2.0`, `net6.0`, and `net8.0`.
 
 - [`DiagnosticsTools.Core`](./src/Core/DiagnosticsTools.Core/README.md) – Shared converters, visual helpers, and utility extensions consumed across the tooling stack.
 - [`DiagnosticsTools.PropertyEditing`](./src/PropertyEditing/DiagnosticsTools.PropertyEditing/README.md) – XAML mutation orchestration, telemetry hooks, and guard helpers used by the property inspector (`net6.0`/`net8.0`).
 - [`DiagnosticsTools.Runtime`](./src/Runtime/DiagnosticsTools.Runtime/README.md) – Runtime undo/redo coordinator and tree abstractions for hot reload scenarios.
 - [`DiagnosticsTools.Input`](./src/Input/DiagnosticsTools.Input/README.md) – Reusable hot key configuration and behaviours.
 - [`DiagnosticsTools.Screenshots`](./src/Screenshots/DiagnosticsTools.Screenshots/README.md) – Screenshot handler interfaces and default file picker implementation.
-- [`DiagnosticsTools.Metrics`](./src/Metrics/DiagnosticsTools.Metrics/README.md) – Metrics stream and visualization tooling consumed by the out-of-process monitor (`net6.0`/`net8.0`).
 - [`DiagnosticsTools.DiagnosticsPublisher`](./src/Publisher/DiagnosticsTools.DiagnosticsPublisher/DiagnosticsTools.DiagnosticsPublisher.csproj) – Lightweight UDP publisher that streams metrics and diagnostics envelopes out-of-process.
 - [`DiagnosticsTools.DiagnosticsContracts`](./src/Contracts/DiagnosticsTools.DiagnosticsContracts/DiagnosticsTools.DiagnosticsContracts.csproj) – Shared envelope models consumed by the publisher, monitor, viewer, and DevTools thin client.
 - [`DiagnosticsTools.Monitor`](./src/Monitor/DiagnosticsTools.Monitor/DiagnosticsTools.Monitor.csproj) – Standalone metrics monitor (port of Metriclonia) that listens on UDP for live performance data.

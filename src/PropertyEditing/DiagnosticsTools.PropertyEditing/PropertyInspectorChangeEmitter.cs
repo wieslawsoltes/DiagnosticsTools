@@ -1239,7 +1239,6 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 var result = await _dispatcher.DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
                 var duration = CalculateElapsed(startTimestamp);
-                MutationInstrumentation.RecordMutation(duration, result.Status);
                 MutationTelemetry.ReportMutation(envelope, result, duration, provenance);
                 if (!_dispatcherProvidesNotifications)
                 {
@@ -1256,7 +1255,6 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 var duration = CalculateElapsed(startTimestamp);
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
-                MutationInstrumentation.RecordMutation(duration, failure.Status);
                 MutationTelemetry.ReportMutation(envelope, failure, duration, provenance);
                 OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure, provenance));
                 return failure;
