@@ -10,16 +10,23 @@
   <UserControl.Resources>
     <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
   </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="StackPanel.search-match TextBlock">
+      <Setter Property="Foreground" Value="DodgerBlue" />
+    </Style>
+  </UserControl.Styles>
   <UserControl.DataTemplates>
     <DataTemplate DataType="vm:CombinedTreeTemplateGroupNode">
-      <StackPanel Orientation="Horizontal" Spacing="8">
+      <StackPanel Orientation="Horizontal" Spacing="8"
+                  Classes.search-match="{Binding IsSearchMatch}">
         <TextBlock Text="{Binding Type}"
                    FontStyle="Italic"
                    Foreground="{DynamicResource ThemeForegroundLowBrush}" />
       </StackPanel>
     </DataTemplate>
     <DataTemplate DataType="vm:CombinedTreeNode">
-      <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}">
+      <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}"
+                  Classes.search-match="{Binding IsSearchMatch}">
         <StackPanel.Styles>
           <Style Selector="StackPanel[Tag=Template]">
             <Setter Property="Opacity" Value="0.75" />
@@ -41,7 +48,8 @@
       </StackPanel>
     </DataTemplate>
     <DataTemplate DataType="vm:TreeNode">
-      <StackPanel Orientation="Horizontal" Spacing="8">
+      <StackPanel Orientation="Horizontal" Spacing="8"
+                  Classes.search-match="{Binding IsSearchMatch}">
         <StackPanel.Styles>
           <Style Selector="StackPanel[Tag=True]">
             <Setter Property="Opacity" Value="0.5"/>

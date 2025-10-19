@@ -24,6 +24,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private SourceInfo? _sourceInfo;
         private XamlAstNodeDescriptor? _xamlDescriptor;
         private bool _isMultiSelected;
+        private bool _isSearchMatch;
 
         protected TreeNode(AvaloniaObject avaloniaObject, TreeNode? parent, string? customTypeName = null)
         {
@@ -163,6 +164,12 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             get => _isMultiSelected;
             internal set => RaiseAndSetIfChanged(ref _isMultiSelected, value);
+        }
+
+        public bool IsSearchMatch
+        {
+            get => _isSearchMatch;
+            internal set => RaiseAndSetIfChanged(ref _isSearchMatch, value);
         }
 
         public void Dispose()

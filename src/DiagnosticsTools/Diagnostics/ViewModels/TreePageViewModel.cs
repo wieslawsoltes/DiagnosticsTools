@@ -3341,6 +3341,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
         protected void ApplyTreeFilter()
         {
+            ClearSearchHighlights();
+
             var hasFilter = !string.IsNullOrWhiteSpace(TreeFilter.FilterString);
 
             if (ScopedNode is { } scoped)
@@ -3379,6 +3381,7 @@ namespace Avalonia.Diagnostics.ViewModels
             bool FilterNode(TreeNode node, bool ancestorMatch)
             {
                 var matches = hasFilter && CanNodeMatch(node) && NodeMatchesFilter(node);
+                node.IsSearchMatch = matches;
                 var hasMatchInChildren = false;
 
                 foreach (var child in node.Children)
@@ -3409,11 +3412,30 @@ namespace Avalonia.Diagnostics.ViewModels
 
             void ResetVisibility(TreeNode node)
             {
+                node.IsSearchMatch = false;
                 node.IsVisible = true;
                 foreach (var child in node.Children)
                 {
                     ResetVisibility(child);
                 }
+            }
+        }
+
+        private void ClearSearchHighlights()
+        {
+            foreach (var root in _rootNodes)
+            {
+                ClearSearchMatchRecursive(root);
+            }
+        }
+
+        private static void ClearSearchMatchRecursive(TreeNode node)
+        {
+            node.IsSearchMatch = false;
+
+            foreach (var child in node.Children)
+            {
+                ClearSearchMatchRecursive(child);
             }
         }
 

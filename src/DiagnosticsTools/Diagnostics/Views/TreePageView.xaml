@@ -10,6 +10,11 @@
   <UserControl.Resources>
     <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
   </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="StackPanel.search-match TextBlock">
+      <Setter Property="Foreground" Value="DodgerBlue"/>
+    </Style>
+  </UserControl.Styles>
   <Grid ColumnDefinitions="0.35*,4,0.65*">
     <Grid RowDefinitions="Auto,*">
       <Grid Grid.Row="0"
@@ -71,7 +76,8 @@
                 <Setter Property="Opacity" Value="0.15"/>
               </Style>
             </Border.Styles>
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                        Classes.search-match="{Binding IsSearchMatch}">
               <StackPanel.Styles>
                 <Style Selector="StackPanel[Tag=True]">
                   <Setter Property="Opacity" Value="0.5"/>
