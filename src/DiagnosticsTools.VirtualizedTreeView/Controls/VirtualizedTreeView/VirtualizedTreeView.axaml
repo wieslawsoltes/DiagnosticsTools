@@ -11,7 +11,8 @@
            SelectedValueBinding="{ReflectionBinding Node}"
            SelectedValue="{TemplateBinding SelectedItem, Mode=TwoWay}"
            ItemContainerTheme="{TemplateBinding ItemContainerTheme}"
-           Tag="{TemplateBinding ItemTemplate}">
+           Tag="{TemplateBinding ItemTemplate}"
+           ScrollViewer.HorizontalScrollBarVisibility="Auto">
           <treeView:VirtualizedTreeListBox.ItemTemplate>
             <DataTemplate x:DataType="treeView:FlatTreeNode">
               <ContentControl Content="{CompiledBinding Node}"
