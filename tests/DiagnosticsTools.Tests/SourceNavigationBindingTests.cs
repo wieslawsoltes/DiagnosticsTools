@@ -36,6 +36,7 @@ namespace DiagnosticsTools.Tests
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
             using var workspace = new XamlAstWorkspace();
+            var coordinator = new SelectionCoordinator();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
@@ -43,7 +44,9 @@ namespace DiagnosticsTools.Tests
                 infoService,
                 navigator,
                 workspace,
-                new RuntimeMutationCoordinator());
+                new RuntimeMutationCoordinator(),
+                coordinator,
+                "Test.Tree");
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -81,6 +84,7 @@ namespace DiagnosticsTools.Tests
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
             using var workspace = new XamlAstWorkspace();
+            var coordinator = new SelectionCoordinator();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
@@ -88,7 +92,9 @@ namespace DiagnosticsTools.Tests
                 infoService,
                 navigator,
                 workspace,
-                new RuntimeMutationCoordinator());
+                new RuntimeMutationCoordinator(),
+                coordinator,
+                "Test.Tree");
 
             var rootNode = Assert.Single(treeViewModel.Nodes);
             var childNode = Assert.Single(rootNode.Children);
@@ -124,6 +130,7 @@ namespace DiagnosticsTools.Tests
 
             using var mainViewModel = new MainViewModel(root, infoService, navigator);
             using var workspace = new XamlAstWorkspace();
+            var coordinator = new SelectionCoordinator();
             using var treeViewModel = new TreePageViewModel(
                 mainViewModel,
                 VisualTreeNode.Create(root),
@@ -131,7 +138,9 @@ namespace DiagnosticsTools.Tests
                 infoService,
                 navigator,
                 workspace,
-                new RuntimeMutationCoordinator());
+                new RuntimeMutationCoordinator(),
+                coordinator,
+                "Test.Tree");
 
             var previewTcs = new TaskCompletionSource<SourcePreviewViewModel?>();
             treeViewModel.SourcePreviewRequested += (_, preview) => previewTcs.TrySetResult(preview);

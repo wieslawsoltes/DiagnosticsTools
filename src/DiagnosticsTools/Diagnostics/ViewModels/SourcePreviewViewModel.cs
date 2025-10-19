@@ -30,6 +30,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private int? _highlightSpanLength;
         private readonly Action<XamlAstNodeDescriptor?>? _navigateToAst;
         private readonly Action<XamlAstSelection?>? _synchronizeSelection;
+        private readonly SelectionCoordinator? _selectionCoordinator;
+        private readonly string? _selectionOwnerId;
         private readonly DelegateCommand _openSourceCommand;
         private readonly DelegateCommand _revealInTreeCommand;
         private readonly SourcePreviewNavigationTarget _revealNavigationTarget;
@@ -65,7 +67,9 @@ namespace Avalonia.Diagnostics.ViewModels
             HttpClient? httpClient = null,
             string? initialErrorMessage = null,
             MainViewModel? mutationOwner = null,
-            XamlAstWorkspace? xamlAstWorkspace = null)
+            XamlAstWorkspace? xamlAstWorkspace = null,
+            SelectionCoordinator? selectionCoordinator = null,
+            string? selectionOwnerId = null)
         {
             SourceInfo = sourceInfo ?? throw new ArgumentNullException(nameof(sourceInfo));
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
@@ -74,6 +78,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _navigateToAst = navigateToAst;
             _synchronizeSelection = synchronizeSelection;
             _xamlAstWorkspace = xamlAstWorkspace;
+            _selectionCoordinator = selectionCoordinator;
+            _selectionOwnerId = selectionOwnerId;
             if (_xamlAstWorkspace is not null)
             {
                 SubscribeToWorkspace();
@@ -353,12 +359,12 @@ namespace Avalonia.Diagnostics.ViewModels
             _navigateToAst?.Invoke(AstSelection?.Node);
         }
 
-        public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, MainViewModel? mutationOwner = null)
+        public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, MainViewModel? mutationOwner = null, SelectionCoordinator? selectionCoordinator = null, string? selectionOwnerId = null)
         {
             var messageContext = string.IsNullOrWhiteSpace(context) ? "the requested item" : context;
             var message = $"Source information for {messageContext} is unavailable.";
             var placeholderInfo = new SourceInfo(null, null, null, null, null, null, SourceOrigin.Unknown);
-            return new SourcePreviewViewModel(placeholderInfo, sourceNavigator, astSelection: null, navigateToAst: null, httpClient: httpClient, initialErrorMessage: message, mutationOwner: mutationOwner);
+            return new SourcePreviewViewModel(placeholderInfo, sourceNavigator, astSelection: null, navigateToAst: null, httpClient: httpClient, initialErrorMessage: message, mutationOwner: mutationOwner, selectionCoordinator: selectionCoordinator, selectionOwnerId: selectionOwnerId);
         }
 
         internal void HandleMutationCompleted(MutationCompletedEventArgs args)
@@ -462,6 +468,24 @@ namespace Avalonia.Diagnostics.ViewModels
             return;
         }
 
+            if (_selectionCoordinator is not null && _selectionCoordinator.IsCurrent(selection))
+            {
+                _isApplyingTreeSelection = true;
+                try
+                {
+                    AstSelection = selection;
+                    ApplyHighlightForCurrentSelection();
+                    RefreshNavigationState();
+                }
+                finally
+                {
+                    _isApplyingTreeSelection = false;
+                }
+
+                RefreshDocumentPathFromSelection(selection);
+                return;
+            }
+
             var currentDocument = AstSelection?.Document;
             var newDocument = selection.Document;
             var requiresReload = false;
@@ -529,14 +553,35 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            AstSelection = new XamlAstSelection(
-                currentSelection.Document,
-                descriptor,
-                currentSelection.DocumentNodes);
+            var document = currentSelection.Document;
+            var documentNodes = currentSelection.DocumentNodes ?? Array.Empty<XamlAstNodeDescriptor>();
+            var newSelection = new XamlAstSelection(document, descriptor, documentNodes);
 
-            ApplyHighlightForCurrentSelection();
-            RefreshNavigationState();
-            _synchronizeSelection?.Invoke(AstSelection);
+            IDisposable? publishToken = null;
+            bool changed = true;
+            if (_selectionCoordinator is not null && !string.IsNullOrWhiteSpace(_selectionOwnerId))
+            {
+                if (!_selectionCoordinator.TryBeginPublish(_selectionOwnerId!, newSelection, out publishToken, out changed))
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                AstSelection = newSelection;
+                ApplyHighlightForCurrentSelection();
+                RefreshNavigationState();
+
+                if (changed)
+                {
+                    _synchronizeSelection?.Invoke(AstSelection);
+                }
+            }
+            finally
+            {
+                publishToken?.Dispose();
+            }
         }
 
         private void SubscribeToWorkspace()

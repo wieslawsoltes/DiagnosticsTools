@@ -228,11 +228,35 @@ namespace Avalonia.Diagnostics.Controls
             {
                 _textEditor.Document = new TextDocument(snippet);
                 _currentSnippet = snippet;
+                _textEditor.TextArea.ClearSelection();
+                _textEditor.TextArea.Caret.Offset = 0;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_textEditor is null)
+                    {
+                        return;
+                    }
+
+                    _textEditor.TextArea.ClearSelection();
+                    _textEditor.TextArea.Caret.Offset = 0;
+                }, DispatcherPriority.Background);
             }
             else if (changed)
             {
                 textDocument.Text = snippet;
                 _currentSnippet = snippet;
+                _textEditor.TextArea.ClearSelection();
+                _textEditor.TextArea.Caret.Offset = 0;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_textEditor is null)
+                    {
+                        return;
+                    }
+
+                    _textEditor.TextArea.ClearSelection();
+                    _textEditor.TextArea.Caret.Offset = 0;
+                }, DispatcherPriority.Background);
             }
 
             UpdateFoldings(document, changed || document is null);
@@ -332,6 +356,9 @@ namespace Avalonia.Diagnostics.Controls
                 var document = _textEditor.Document;
                 var invalidate = false;
 
+                // Avoid AvaloniaEdit retaining the previous full-document selection when new content is loaded.
+                _textEditor.TextArea.ClearSelection();
+
                 if (document is null || document.LineCount == 0 || highlightedStartLine is null || highlightedEndLine is null)
                 {
                     if (_lineColorizer.StartLine is not null || _lineColorizer.EndLine is not null)
@@ -393,6 +420,7 @@ namespace Avalonia.Diagnostics.Controls
 
                         _textEditor.ScrollTo(caretLine, caretColumn);
                         _textEditor.TextArea.Caret.Offset = Math.Min(caretOffset, document.TextLength);
+                        _textEditor.TextArea.ClearSelection();
                     }
                 }
 
@@ -444,6 +472,10 @@ namespace Avalonia.Diagnostics.Controls
                 }
 
                 if (invalidate)
+                {
+                    _textEditor.TextArea.TextView.InvalidateVisual();
+                }
+                else
                 {
                     _textEditor.TextArea.TextView.InvalidateVisual();
                 }

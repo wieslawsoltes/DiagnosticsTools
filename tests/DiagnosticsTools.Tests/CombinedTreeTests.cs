@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -10,6 +13,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Avalonia.Diagnostics.Runtime;
+using Avalonia.Diagnostics.SourceNavigation;
 using Xunit;
 
 namespace DiagnosticsTools.Tests
@@ -82,7 +86,8 @@ namespace DiagnosticsTools.Tests
             using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
             using var workspace = new XamlAstWorkspace();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator());
+            var coordinator = new SelectionCoordinator();
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree.Combined");
 
             var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
             var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
@@ -107,7 +112,8 @@ namespace DiagnosticsTools.Tests
             using var mainViewModel = new MainViewModel(control, sourceInfoService, sourceNavigator);
             var pinned = new HashSet<string>();
             using var workspace = new XamlAstWorkspace();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator());
+            var coordinator = new SelectionCoordinator();
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree.Combined");
 
             combinedTree.TreeFilter.FilterString = "Border";
 
@@ -119,6 +125,121 @@ namespace DiagnosticsTools.Tests
 
             Assert.True(templateGroup.IsVisible);
             Assert.True(templateGroup.IsExpanded);
+        }
+
+        [AvaloniaFact]
+        public async Task CombinedTree_SynchronizeSelection_KeepsTargetNode()
+        {
+            var xaml = """
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel x:Name="RootPanel">
+    <Button x:Name="ChildButton" Content="Preview" />
+  </StackPanel>
+</UserControl>
+""";
+
+            var tempFile = Path.Combine(Path.GetTempPath(), $"CombinedPreview_{Guid.NewGuid():N}.axaml");
+            await File.WriteAllTextAsync(tempFile, xaml);
+
+            try
+            {
+                var root = new StackPanel { Name = "RootPanel" };
+                var child = new Button { Name = "ChildButton" };
+                root.Children.Add(child);
+
+                var infoMap = new Dictionary<AvaloniaObject, SourceInfo>
+                {
+                    [root] = new SourceInfo(tempFile, null, 2, 3, 5, 1, SourceOrigin.Local)
+                };
+
+                var service = new DelegatingSourceInfoService(
+                    objectResolver: obj => infoMap.TryGetValue(obj, out var info) ? info : null);
+                var navigator = new StubSourceNavigator();
+
+                using var mainViewModel = new MainViewModel(root, service, navigator);
+                using var workspace = new XamlAstWorkspace();
+                var coordinator = new SelectionCoordinator();
+                var combinedTree = CombinedTreePageViewModel.FromRoot(
+                    mainViewModel,
+                    root,
+                    new HashSet<string>(),
+                    service,
+                    navigator,
+                    workspace,
+                    new RuntimeMutationCoordinator(),
+                    coordinator,
+                    "Test.Tree.Combined");
+
+                combinedTree.SearchLogicalNodesOnly = false;
+
+                var rootNode = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
+                var childNode = FindNode(rootNode, child);
+                Assert.NotNull(childNode);
+
+                var ensureMethod = typeof(TreePageViewModel).GetMethod("EnsureSourceInfoAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                Assert.NotNull(ensureMethod);
+                await (Task<SourceInfo?>)ensureMethod!.Invoke(combinedTree, new object?[] { childNode })!;
+
+                var document = await workspace.GetDocumentAsync(tempFile);
+                var index = await workspace.GetIndexAsync(tempFile);
+                var descriptor = index.Nodes.First(node => string.Equals(node.XamlName, "ChildButton", StringComparison.Ordinal));
+                var selection = new XamlAstSelection(document, descriptor, index.Nodes.ToList());
+
+                await Dispatcher.UIThread.InvokeAsync(() => combinedTree.SelectedNode = childNode);
+
+                var syncMethod = typeof(TreePageViewModel).GetMethod("SynchronizeSelectionFromPreview", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                Assert.NotNull(syncMethod);
+                await Dispatcher.UIThread.InvokeAsync(() => syncMethod!.Invoke(combinedTree, new object?[] { selection }));
+
+                await WaitForAsync(() => ReferenceEquals(combinedTree.SelectedNode, childNode));
+
+                Assert.Same(childNode, combinedTree.SelectedNode);
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+        }
+
+        private static CombinedTreeNode? FindNode(CombinedTreeNode root, AvaloniaObject target)
+        {
+            if (ReferenceEquals(root.Visual, target))
+            {
+                return root;
+            }
+
+            foreach (var child in root.Children)
+            {
+                if (child is CombinedTreeNode combined)
+                {
+                    var result = FindNode(combined, target);
+                    if (result is not null)
+                    {
+                        return result;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static async Task WaitForAsync(Func<bool> condition, TimeSpan? timeout = null)
+        {
+            var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromMilliseconds(500));
+
+            while (!condition())
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    break;
+                }
+
+                await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            }
         }
 
         private class TestTemplatedControl : TemplatedControl

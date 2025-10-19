@@ -6,6 +6,7 @@ using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
 using Avalonia.Styling;
+using Avalonia.Threading;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -18,8 +19,10 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
-            RuntimeMutationCoordinator runtimeCoordinator)
-            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator)
+            RuntimeMutationCoordinator runtimeCoordinator,
+            SelectionCoordinator selectionCoordinator,
+            string selectionOwnerId)
+            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId)
         {
         }
 
@@ -44,15 +47,17 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
-            RuntimeMutationCoordinator runtimeCoordinator)
+            RuntimeMutationCoordinator runtimeCoordinator,
+            SelectionCoordinator selectionCoordinator,
+            string selectionOwnerId)
         {
             var nodes = CombinedTreeNode.Create(root);
             if (nodes.Length == 0)
             {
-                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator);
+                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId);
             }
 
-            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator);
+            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId);
         }
 
         protected override bool CanNodeMatch(TreeNode node)
@@ -75,8 +80,18 @@ namespace Avalonia.Diagnostics.ViewModels
 
         protected override TreeNode? ResolveSelectionTarget(TreeNode node) =>
             SearchLogicalNodesOnly
-                ? GetLogicalAncestor(node)
+                ? ResolveSelectionTargetForLogicalSearch(node)
                 : node;
+
+        private TreeNode? ResolveSelectionTargetForLogicalSearch(TreeNode node)
+        {
+            if (node is CombinedTreeNode { Role: CombinedTreeNode.CombinedNodeRole.Template } templateNode)
+            {
+                return templateNode;
+            }
+
+            return GetLogicalAncestor(node) ?? node;
+        }
 
         private static TreeNode? GetLogicalAncestor(TreeNode? node)
         {
@@ -117,6 +132,11 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return false;
+        }
+
+        public override void SelectControl(Control control)
+        {
+            Dispatcher.UIThread.InvokeAsync(() => base.SelectControl(control), DispatcherPriority.Loaded);
         }
     }
 }

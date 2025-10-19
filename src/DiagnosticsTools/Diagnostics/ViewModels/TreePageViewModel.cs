@@ -21,6 +21,8 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Threading.Tasks;
 using System.Text;
+using System.Net.Http;
+using System.Security.Cryptography;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -43,6 +45,9 @@ namespace Avalonia.Diagnostics.ViewModels
         private ISourceNavigator _sourceNavigator;
         private SourceInfo? _selectedNodeSourceInfo;
         private XamlAstSelection? _selectedNodeXaml;
+        private readonly SelectionCoordinator _selectionCoordinator;
+        private readonly string _selectionOwnerId;
+        private readonly string _previewOwnerId;
         private readonly List<WeakReference<SourcePreviewViewModel>> _previewObservers = new();
         private readonly object _previewObserversGate = new();
         private bool _suppressPreviewNavigation;
@@ -65,6 +70,12 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly DelegateCommand _removeFromMultiSelectionCommand;
         private readonly DelegateCommand _clearMultiSelectionCommand;
         private readonly DelegateCommand _editTemplateCommand;
+        private readonly ConcurrentDictionary<string, DocumentNodeIndex> _documentNodeIndices = new(PathComparer);
+        private readonly ConcurrentDictionary<string, Task<string?>> _remoteDocumentCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, string> _remoteDocumentPaths = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, string> _cachedDocumentRemoteIndex = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly HttpClient RemoteDocumentClient = new();
+        private readonly Dictionary<XamlAstNodeId, string> _descriptorDocuments = new();
         internal enum SubtreePasteMode
         {
             Child,
@@ -83,7 +94,9 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
-            RuntimeMutationCoordinator runtimeCoordinator)
+            RuntimeMutationCoordinator runtimeCoordinator,
+            SelectionCoordinator selectionCoordinator,
+            string selectionOwnerId)
         {
             MainView = mainView;
             _rootNodes = nodes;
@@ -93,6 +106,9 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _xamlAstWorkspace = xamlAstWorkspace ?? throw new ArgumentNullException(nameof(xamlAstWorkspace));
             _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
+            _selectionCoordinator = selectionCoordinator ?? throw new ArgumentNullException(nameof(selectionCoordinator));
+            _selectionOwnerId = string.IsNullOrWhiteSpace(selectionOwnerId) ? throw new ArgumentException("Selection owner id must not be null or whitespace.", nameof(selectionOwnerId)) : selectionOwnerId;
+            _previewOwnerId = selectionOwnerId + ".Preview";
             _changeEmitter = null;
             _xamlAstWorkspace.DocumentChanged += OnXamlDocumentChanged;
             _xamlAstWorkspace.NodesChanged += OnXamlNodesChanged;
@@ -235,7 +251,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool CanNavigateToSource => HasSelectedNodeSource;
 
-        public bool CanPreviewSource => HasSelectedNodeSource;
+        public bool CanPreviewSource => HasSelectedNodeSource || SelectedNodeXaml?.Document is not null;
 
         public bool CanDeleteNode
         {
@@ -276,6 +292,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(CanDeleteNode));
                     RaisePropertyChanged(nameof(CanCopySubtree));
                     RaisePropertyChanged(nameof(CanPasteSubtree));
+                    RaisePropertyChanged(nameof(CanPreviewSource));
                     UpdateCommandStates();
                 }
             }
@@ -398,6 +415,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 _previewObservers.Clear();
             }
+
+            _documentNodeIndices.Clear();
+            _remoteDocumentPaths.Clear();
+            _cachedDocumentRemoteIndex.Clear();
+            _remoteDocumentCache.Clear();
         }
 
         public async void NavigateToSource()
@@ -450,8 +472,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 {
                     var context = node.Visual?.GetType().Name ?? node.Type;
                     var preview = info is not null
-                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, SynchronizeSelectionFromPreview, mutationOwner: MainView, xamlAstWorkspace: _xamlAstWorkspace)
-                        : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator, mutationOwner: MainView);
+                        ? new SourcePreviewViewModel(info, _sourceNavigator, SelectedNodeXaml, NavigateToAstNode, SynchronizeSelectionFromPreview, mutationOwner: MainView, xamlAstWorkspace: _xamlAstWorkspace, selectionCoordinator: _selectionCoordinator, selectionOwnerId: _previewOwnerId)
+                        : SourcePreviewViewModel.CreateUnavailable(context, _sourceNavigator, mutationOwner: MainView, selectionCoordinator: _selectionCoordinator, selectionOwnerId: _previewOwnerId);
                     if (info is not null)
                     {
                         RegisterPreview(preview);
@@ -567,6 +589,19 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private void NotifyPreviewSelectionChanged(XamlAstSelection? selection)
         {
+            IDisposable? publishToken = null;
+            try
+            {
+                if (!_selectionCoordinator.TryBeginPublish(_selectionOwnerId, selection, out publishToken, out var changed))
+                {
+                    return;
+                }
+
+                if (!changed)
+                {
+                    return;
+                }
+
             SourcePreviewViewModel[]? snapshot = null;
 
             lock (_previewObserversGate)
@@ -608,6 +643,11 @@ namespace Avalonia.Diagnostics.ViewModels
             foreach (var preview in snapshot)
             {
                 preview.UpdateSelectionFromTree(selection);
+            }
+            }
+            finally
+            {
+                publishToken?.Dispose();
             }
         }
 
@@ -1108,6 +1148,10 @@ namespace Avalonia.Diagnostics.ViewModels
             if (!ReferenceEquals(_sourceInfoService, sourceInfoService))
             {
                 _sourceInfoCache.Clear();
+                _documentNodeIndices.Clear();
+                _remoteDocumentPaths.Clear();
+                _cachedDocumentRemoteIndex.Clear();
+                _remoteDocumentCache.Clear();
                 _sourceInfoService = sourceInfoService;
             }
 
@@ -1125,13 +1169,11 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public TreeNode? FindNode(Control control)
         {
-            foreach (var node in Nodes)
+            foreach (var node in EnumerateAllNodes())
             {
-                var result = FindNode(node, control);
-
-                if (result != null)
+                if (node.Visual is Control visual && ReferenceEquals(visual, control))
                 {
-                    return result;
+                    return ResolveSelectionTarget(node);
                 }
             }
 
@@ -1142,6 +1184,26 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             var task = _sourceInfoCache.GetOrAdd(node, ResolveNodeSourceInfoAsync);
             var info = await task.ConfigureAwait(false);
+            if (info is not null)
+            {
+                await IndexNodeSourceInfoAsync(node, info).ConfigureAwait(false);
+            }
+            else
+            {
+                await TryEnsureDescriptorWithoutSourceInfoAsync(node).ConfigureAwait(false);
+
+                info = TryCreateSyntheticSourceInfo(node);
+                if (info is not null)
+                {
+                    _sourceInfoCache[node] = Task.FromResult<SourceInfo?>(info);
+                    await IndexNodeSourceInfoAsync(node, info).ConfigureAwait(false);
+                }
+                else
+                {
+                    RemoveNodeFromSourceIndex(node);
+                }
+            }
+
             await Dispatcher.UIThread.InvokeAsync(() => node.UpdateSourceInfo(info));
             return info;
         }
@@ -1243,7 +1305,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     SelectedNodeXaml = xamlSelection;
                     if (targetNode is not null)
                     {
-                        RegisterXamlDescriptor(targetNode, xamlSelection?.Node);
+                        RegisterXamlDescriptor(targetNode, xamlSelection?.Node, xamlSelection?.Document?.Path);
                     }
                 }
             });
@@ -1279,9 +1341,22 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            ExpandNode(node.Parent);
-            // Use dispatcher to allow the tree to expand and render before selecting
-            Dispatcher.UIThread.Post(() => SelectedNode = node, DispatcherPriority.Loaded);
+            var targetNode = node;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!IsNodeInScope(targetNode))
+                {
+                    ShowFullTree();
+                }
+
+                if (!targetNode.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+                {
+                    TreeFilter.FilterString = string.Empty;
+                }
+
+                ExpandNode(targetNode.Parent);
+                SelectedNode = targetNode;
+            }, DispatcherPriority.Background);
         }
 
         protected virtual TreeNode? ResolveSelectionTarget(TreeNode node) => node;
@@ -1562,6 +1637,19 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
+            IDisposable? publishToken = null;
+            bool publishChanged = true;
+            if (!_selectionCoordinator.TryBeginPublish(_previewOwnerId, selection, out publishToken, out publishChanged))
+            {
+                return;
+            }
+
+            if (!publishChanged)
+            {
+                publishToken?.Dispose();
+                return;
+            }
+
             unchecked
             {
                 _previewNavigationRevision++;
@@ -1570,13 +1658,14 @@ namespace Avalonia.Diagnostics.ViewModels
             var navigationRevision = _previewNavigationRevision;
             var selectedNodeRevision = _selectedNodeRevision;
 
-            _ = SynchronizeSelectionFromPreviewAsync(selection, navigationRevision, selectedNodeRevision);
+            _ = SynchronizeSelectionFromPreviewAsync(selection, navigationRevision, selectedNodeRevision, publishToken);
         }
 
         private async Task SynchronizeSelectionFromPreviewAsync(
             XamlAstSelection selection,
             int navigationRevision,
-            int selectedNodeRevision)
+            int selectedNodeRevision,
+            IDisposable? publishToken)
         {
             TreeNode? target;
             lock (_nodesByXamlId)
@@ -1591,65 +1680,73 @@ namespace Avalonia.Diagnostics.ViewModels
 
             if (target is null)
             {
+                publishToken?.Dispose();
                 return;
             }
 
             if (!Dispatcher.UIThread.CheckAccess())
             {
                 await Dispatcher.UIThread.InvokeAsync(
-                    () => ApplySelectionFromPreview(target, selection, navigationRevision, selectedNodeRevision),
+                    () => ApplySelectionFromPreviewWithToken(target, selection, navigationRevision, selectedNodeRevision, publishToken),
                     DispatcherPriority.Background);
-            }
-            else
-            {
-                ApplySelectionFromPreview(target, selection, navigationRevision, selectedNodeRevision);
-            }
-        }
-
-        private void ApplySelectionFromPreview(
-            TreeNode target,
-            XamlAstSelection selection,
-            int navigationRevision,
-            int selectedNodeRevision)
-        {
-            if (!ShouldApplyPreviewSelection(navigationRevision, selectedNodeRevision, target, selection))
-            {
                 return;
             }
 
-            _suppressPreviewNavigation = true;
+            ApplySelectionFromPreviewWithToken(target, selection, navigationRevision, selectedNodeRevision, publishToken);
+        }
+
+        private void ApplySelectionFromPreviewWithToken(
+            TreeNode target,
+            XamlAstSelection selection,
+            int navigationRevision,
+            int selectedNodeRevision,
+            IDisposable? publishToken)
+        {
             try
             {
-                RegisterXamlDescriptor(target, selection.Node);
-
-                if (!IsNodeInScope(target))
+                if (!ShouldApplyPreviewSelection(navigationRevision, selectedNodeRevision, target, selection))
                 {
-                    ShowFullTree();
+                    return;
                 }
 
-                if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+                _suppressPreviewNavigation = true;
+                try
                 {
-                    TreeFilter.FilterString = string.Empty;
+                    RegisterXamlDescriptor(target, selection.Node, selection.Document?.Path);
+
+                    if (!IsNodeInScope(target))
+                    {
+                        ShowFullTree();
+                    }
+
+                    if (!target.IsVisible && !string.IsNullOrWhiteSpace(TreeFilter.FilterString))
+                    {
+                        TreeFilter.FilterString = string.Empty;
+                    }
+
+                    ExpandNode(target.Parent);
+
+                    if (!ReferenceEquals(target, SelectedNode))
+                    {
+                        SelectedNode = target;
+                    }
+                    else
+                    {
+                        _ = UpdateSelectedNodeSourceInfoAsync(target);
+                    }
+
+                    SelectedNodeXaml = selection;
+
+                    Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
                 }
-
-                ExpandNode(target.Parent);
-
-                if (!ReferenceEquals(target, SelectedNode))
+                finally
                 {
-                    SelectedNode = target;
+                    _suppressPreviewNavigation = false;
                 }
-                else
-                {
-                    _ = UpdateSelectedNodeSourceInfoAsync(target);
-                }
-
-                SelectedNodeXaml = selection;
-
-                Dispatcher.UIThread.Post(BringIntoView, DispatcherPriority.Background);
             }
             finally
             {
-                _suppressPreviewNavigation = false;
+                publishToken?.Dispose();
             }
         }
 
@@ -1697,75 +1794,107 @@ namespace Avalonia.Diagnostics.ViewModels
                 return null;
             }
 
-            var documentPath = selection.Document?.Path;
-            TreeNode? bestMatch = null;
-            var bestSpan = int.MaxValue;
-
-            foreach (var node in EnumerateNodes())
+            lock (_nodesByXamlId)
             {
-                if (node.XamlDescriptor?.Id == descriptor.Id)
+                if (_nodesByXamlId.TryGetValue(descriptor.Id, out var mapped))
                 {
-                    return node;
-                }
-
-                var info = node.SourceInfo;
-                if (info is null)
-                {
-                    info = await EnsureSourceInfoAsync(node).ConfigureAwait(false);
-                }
-
-                if (info is null)
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrWhiteSpace(documentPath))
-                {
-                    var targetPath = documentPath!;
-
-                    if (string.IsNullOrWhiteSpace(info.LocalPath))
-                    {
-                        continue;
-                    }
-
-                    if (!PathsEqual(info.LocalPath!, targetPath))
-                    {
-                        continue;
-                    }
-                }
-
-                if (info.StartLine is not int infoStart)
-                {
-                    continue;
-                }
-
-                var infoEnd = info.EndLine ?? infoStart;
-                var descriptorStart = Math.Max(descriptor.LineSpan.Start.Line, 1);
-                var descriptorEnd = Math.Max(descriptor.LineSpan.End.Line, descriptorStart);
-
-                if (descriptorStart < infoStart || descriptorStart > infoEnd)
-                {
-                    continue;
-                }
-
-                var spanLength = descriptorEnd - descriptorStart;
-                if (spanLength < bestSpan)
-                {
-                    bestSpan = spanLength;
-                    bestMatch = node;
+                    return mapped;
                 }
             }
 
-            return bestMatch;
+            var descriptorStart = Math.Max(descriptor.LineSpan.Start.Line, 1);
+            var descriptorEnd = Math.Max(descriptor.LineSpan.End.Line, descriptorStart);
+            var documentKey = GetDocumentKeyForSelection(selection);
+
+            if (documentKey is not null &&
+                descriptorStart > 0 &&
+                _documentNodeIndices.TryGetValue(documentKey, out var documentIndex) &&
+                documentIndex.TryGetBestMatch(descriptorStart, descriptorEnd, out var indexedMatch))
+            {
+                return indexedMatch;
+            }
+
+            return await FindNodeBySelectionFallbackAsync(selection, descriptor, descriptorStart, descriptorEnd).ConfigureAwait(false);
         }
 
-        private IEnumerable<TreeNode> EnumerateNodes()
+        private Task<TreeNode?> FindNodeBySelectionFallbackAsync(
+            XamlAstSelection selection,
+            XamlAstNodeDescriptor descriptor,
+            int descriptorStart,
+            int descriptorEnd)
+        {
+            var selectionPath = selection.Document?.Path;
+            var selectionNormalized = selectionPath is not null ? NormalizeLocalPath(selectionPath) : null;
+            string? selectionRemoteKey = null;
+
+            if (!string.IsNullOrWhiteSpace(selectionNormalized) &&
+                _cachedDocumentRemoteIndex.TryGetValue(selectionNormalized!, out var selectionRemote))
+            {
+                selectionRemoteKey = selectionRemote;
+            }
+            else if (!string.IsNullOrWhiteSpace(selectionPath) &&
+                     Uri.TryCreate(selectionPath, UriKind.Absolute, out var selectionUri))
+            {
+                selectionRemoteKey = selectionUri.AbsoluteUri;
+            }
+
+            var references = new List<DocumentReference>();
+
+            foreach (var node in EnumerateAllNodes())
+            {
+                if (TryBuildDocumentReference(node, out var reference))
+                {
+                    references.Add(reference);
+                }
+            }
+
+            if (selection.Node is { } selectionNode)
+            {
+                var exact = references.FirstOrDefault(r => r.DescriptorId.HasValue && r.DescriptorId.Value.Equals(selectionNode.Id));
+                if (exact.Node is not null)
+                {
+                    return Task.FromResult<TreeNode?>(exact.Node);
+                }
+            }
+
+            var matchingReferences = references
+                .Where(r => PathMatches(r, selectionNormalized, selectionRemoteKey, selectionPath))
+                .ToList();
+
+            if (matchingReferences.Count == 0)
+            {
+                return Task.FromResult<TreeNode?>(null);
+            }
+
+            DocumentReference? best = null;
+            var bestPenalty = int.MaxValue;
+
+            foreach (var reference in matchingReferences)
+            {
+                if (reference.DescriptorId.HasValue && reference.DescriptorId.Value.Equals(descriptor.Id))
+                {
+                    return Task.FromResult<TreeNode?>(reference.Node);
+                }
+
+                var penalty = ComputeMatchPenalty(reference, descriptorStart, descriptorEnd);
+                if (penalty < bestPenalty)
+                {
+                    bestPenalty = penalty;
+                    best = reference;
+                }
+            }
+
+            TreeNode? fallbackNode = best?.Node ?? matchingReferences[0].Node;
+            return Task.FromResult<TreeNode?>(fallbackNode);
+        }
+
+        private IEnumerable<TreeNode> EnumerateAllNodes()
         {
             var stack = new Stack<TreeNode>();
 
-            for (var i = Nodes.Length - 1; i >= 0; i--)
+            for (var i = _rootNodes.Length - 1; i >= 0; i--)
             {
-                stack.Push(Nodes[i]);
+                stack.Push(_rootNodes[i]);
             }
 
             while (stack.Count > 0)
@@ -1781,15 +1910,587 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
-        private void RegisterXamlDescriptor(TreeNode node, XamlAstNodeDescriptor? descriptor)
+        private async Task IndexNodeSourceInfoAsync(TreeNode node, SourceInfo info)
+        {
+            var key = GetDocumentKey(info);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                RemoveNodeFromSourceIndex(node);
+                return;
+            }
+
+            await TryRegisterDescriptorAsync(node, info).ConfigureAwait(false);
+
+            int startLine;
+            int endLine;
+
+            if (info.StartLine is int infoStart && infoStart > 0)
+            {
+                startLine = infoStart;
+                endLine = info.EndLine ?? infoStart;
+            }
+            else if (node.XamlDescriptor is { } descriptor)
+            {
+                startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+                endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+            }
+            else
+            {
+                RemoveNodeFromSourceIndex(node);
+                return;
+            }
+
+            var index = _documentNodeIndices.GetOrAdd(key, _ => new DocumentNodeIndex());
+            index.AddOrUpdate(node, startLine, endLine);
+
+            if (info.RemoteUri is { } remote && string.IsNullOrWhiteSpace(info.LocalPath))
+            {
+                var path = await ResolveDocumentPathAsync(info).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    var normalized = NormalizeLocalPath(path!);
+                    if (!string.IsNullOrEmpty(normalized))
+                    {
+                        _remoteDocumentPaths[remote.AbsoluteUri] = normalized;
+                        _cachedDocumentRemoteIndex[normalized] = remote.AbsoluteUri;
+                    }
+                }
+            }
+        }
+
+        private void RemoveNodeFromSourceIndex(TreeNode node)
+        {
+            string? descriptorPath = null;
+
+            if (node.XamlDescriptor is { } descriptor)
+            {
+                lock (_nodesByXamlId)
+                {
+                    if (_descriptorDocuments.TryGetValue(descriptor.Id, out var path))
+                    {
+                        descriptorPath = path;
+                        _descriptorDocuments.Remove(descriptor.Id);
+                    }
+                }
+            }
+
+            foreach (var index in _documentNodeIndices.Values)
+            {
+                index.Remove(node);
+            }
+
+            if (!string.IsNullOrWhiteSpace(descriptorPath))
+            {
+                _documentNodeIndices.TryRemove(descriptorPath!, out _);
+                _remoteDocumentCache.TryRemove(descriptorPath!, out _);
+
+                if (_cachedDocumentRemoteIndex.TryRemove(descriptorPath!, out var remoteKey) &&
+                    !string.IsNullOrWhiteSpace(remoteKey))
+                {
+                    _remoteDocumentPaths.TryRemove(remoteKey!, out _);
+                    _remoteDocumentCache.TryRemove(remoteKey!, out _);
+                }
+
+                foreach (var pair in _remoteDocumentPaths.ToArray())
+                {
+                    if (PathsEqual(pair.Value, descriptorPath!))
+                    {
+                        _remoteDocumentPaths.TryRemove(pair.Key, out _);
+                        _remoteDocumentCache.TryRemove(pair.Key, out _);
+                        _cachedDocumentRemoteIndex.TryRemove(pair.Value, out _);
+                    }
+                }
+            }
+        }
+
+        private async Task<string?> ResolveDocumentPathAsync(SourceInfo info)
+        {
+            if (!string.IsNullOrWhiteSpace(info.LocalPath))
+            {
+                return NormalizeLocalPath(info.LocalPath!);
+            }
+
+            if (info.RemoteUri is null)
+            {
+                return null;
+            }
+
+            var remote = info.RemoteUri;
+
+            if (remote.IsFile)
+            {
+                var localPath = remote.LocalPath;
+                if (File.Exists(localPath))
+                {
+                    var normalized = NormalizeLocalPath(localPath);
+                    if (!string.IsNullOrEmpty(normalized))
+                    {
+                        _remoteDocumentPaths[remote.AbsoluteUri] = normalized;
+                        _cachedDocumentRemoteIndex[normalized] = remote.AbsoluteUri;
+                    }
+
+                    return normalized;
+                }
+
+                return null;
+            }
+
+            if (_remoteDocumentPaths.TryGetValue(remote.AbsoluteUri, out var cachedPath) &&
+                !string.IsNullOrWhiteSpace(cachedPath) &&
+                File.Exists(cachedPath))
+            {
+                return cachedPath;
+            }
+
+            try
+            {
+                var cacheKey = BuildRemoteCacheKey(remote);
+                var task = _remoteDocumentCache.GetOrAdd(cacheKey, _ => DownloadRemoteDocumentAsync(remote, cacheKey));
+                var path = await task.ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    _remoteDocumentCache.TryRemove(cacheKey, out _);
+                    return null;
+                }
+
+                var normalized = NormalizeLocalPath(path!);
+                if (!string.IsNullOrEmpty(normalized))
+                {
+                    _remoteDocumentPaths[remote.AbsoluteUri] = normalized;
+                    _cachedDocumentRemoteIndex[normalized] = remote.AbsoluteUri;
+                    return normalized;
+                }
+
+                return path;
+            }
+            catch
+            {
+                _remoteDocumentCache.TryRemove(BuildRemoteCacheKey(remote), out _);
+                return null;
+            }
+        }
+
+        private static string? NormalizeLocalPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch
+            {
+                return path;
+            }
+        }
+
+        private string? GetDocumentKey(SourceInfo info)
+        {
+            if (!string.IsNullOrWhiteSpace(info.LocalPath))
+            {
+                return NormalizeLocalPath(info.LocalPath!);
+            }
+
+            return info.RemoteUri?.AbsoluteUri;
+        }
+
+        private string? GetDocumentKeyForSelection(XamlAstSelection selection)
+        {
+            var path = selection.Document?.Path;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            var normalized = NormalizeLocalPath(path!);
+            if (!string.IsNullOrEmpty(normalized) &&
+                _cachedDocumentRemoteIndex.TryGetValue(normalized, out var remoteKey))
+            {
+                return remoteKey;
+            }
+
+            return normalized;
+        }
+
+        private bool TryMatchDocument(SourceInfo info, string documentPath, string? remoteKey)
+        {
+            if (!string.IsNullOrWhiteSpace(info.LocalPath) && PathsEqual(info.LocalPath!, documentPath))
+            {
+                return true;
+            }
+
+            if (remoteKey is not null && info.RemoteUri is { } remote &&
+                string.Equals(remote.AbsoluteUri, remoteKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (info.RemoteUri is { } remoteUri &&
+                _remoteDocumentPaths.TryGetValue(remoteUri.AbsoluteUri, out var cached) &&
+                !string.IsNullOrWhiteSpace(cached) &&
+                PathsEqual(cached, documentPath))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private async Task TryEnsureDescriptorWithoutSourceInfoAsync(TreeNode node)
+        {
+            var candidates = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddCandidate(string? path)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return;
+                }
+
+                var normalized = NormalizeLocalPath(path!) ?? path!;
+                if (seen.Add(normalized))
+                {
+                    candidates.Add(normalized);
+                }
+            }
+
+            foreach (var ancestor in EnumerateAncestorsInclusive(node))
+            {
+                var ancestorInfo = ancestor.SourceInfo;
+                if (ancestorInfo is not null)
+                {
+                    AddCandidate(ancestorInfo.LocalPath);
+                    AddCandidate(ancestorInfo.RemoteUri?.AbsoluteUri);
+                }
+
+                if (ancestor.XamlDescriptor is { } ancestorDescriptor &&
+                    TryGetDescriptorDocumentPath(ancestorDescriptor.Id, out var ancestorDescriptorPath))
+                {
+                    AddCandidate(ancestorDescriptorPath);
+                }
+            }
+
+            AddCandidate(ResolveDocumentPathFromAncestors(node));
+
+            if (ReferenceEquals(node, SelectedNode))
+            {
+                AddCandidate(SelectedNodeXaml?.Document?.Path);
+            }
+
+            foreach (var key in _documentNodeIndices.Keys)
+            {
+                AddCandidate(key);
+            }
+
+            foreach (var value in _remoteDocumentPaths.Values)
+            {
+                AddCandidate(value);
+            }
+
+            foreach (var key in _cachedDocumentRemoteIndex.Keys)
+            {
+                AddCandidate(key);
+            }
+
+            lock (_nodesByXamlId)
+            {
+                foreach (var path in _descriptorDocuments.Values)
+                {
+                    AddCandidate(path);
+                }
+            }
+
+        var previewPaths = new List<string>();
+        lock (_previewObserversGate)
+        {
+            foreach (var reference in _previewObservers)
+            {
+                if (reference.TryGetTarget(out var preview) &&
+                    preview?.AstSelection?.Document?.Path is { } previewPath)
+                {
+                    previewPaths.Add(previewPath);
+                }
+            }
+        }
+
+        foreach (var previewPath in previewPaths)
+        {
+            AddCandidate(previewPath);
+        }
+
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    var index = await _xamlAstWorkspace.GetIndexAsync(candidate).ConfigureAwait(false);
+                    var descriptor = ResolveDescriptor(index, node, null);
+                    if (descriptor is null)
+                    {
+                        continue;
+                    }
+
+                    lock (_nodesByXamlId)
+                    {
+                        if (_nodesByXamlId.TryGetValue(descriptor.Id, out var existing) &&
+                            !ReferenceEquals(existing, node))
+                        {
+                            continue;
+                        }
+                    }
+
+                    var document = await _xamlAstWorkspace.GetDocumentAsync(candidate).ConfigureAwait(false);
+                    var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
+                    var selection = new XamlAstSelection(document, descriptor, descriptors);
+
+                    var startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+                    var endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+                    var documentIndex = _documentNodeIndices.GetOrAdd(candidate, _ => new DocumentNodeIndex());
+                    documentIndex.AddOrUpdate(node, startLine, endLine);
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        RegisterXamlDescriptor(node, descriptor, selection.Document?.Path);
+
+                        if (ReferenceEquals(SelectedNode, node))
+                        {
+                            SelectedNodeXaml = selection;
+                        }
+                    }, DispatcherPriority.Background);
+
+                    return;
+                }
+                catch
+                {
+                    // Try next candidate.
+                }
+            }
+
+            RemoveNodeFromSourceIndex(node);
+        }
+
+        private SourceInfo? TryCreateSyntheticSourceInfo(TreeNode node)
+        {
+            if (node.XamlDescriptor is not { } descriptor)
+            {
+                return null;
+            }
+
+            if (!TryGetDescriptorDocumentPath(descriptor.Id, out var path) || string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            string? localPath = null;
+            Uri? remoteUri = null;
+            SourceOrigin origin = SourceOrigin.Unknown;
+
+            if (File.Exists(path))
+            {
+                localPath = path;
+                origin = SourceOrigin.Local;
+            }
+            else if (Uri.TryCreate(path, UriKind.Absolute, out var uri))
+            {
+                remoteUri = uri;
+                origin = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                    ? SourceOrigin.SourceLink
+                    : SourceOrigin.Unknown;
+            }
+
+            if (localPath is null && remoteUri is null)
+            {
+                return null;
+            }
+
+            var startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+            var startColumn = Math.Max(descriptor.LineSpan.Start.Column, 1);
+            var endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+            var endColumn = Math.Max(descriptor.LineSpan.End.Column, startColumn);
+
+            return new SourceInfo(
+                LocalPath: localPath,
+                RemoteUri: remoteUri,
+                StartLine: startLine,
+                StartColumn: startColumn,
+                EndLine: endLine,
+                EndColumn: endColumn,
+                Origin: origin);
+        }
+
+        private static IEnumerable<TreeNode> EnumerateAncestorsInclusive(TreeNode node)
+        {
+            var current = node;
+            while (current is not null)
+            {
+                yield return current;
+                current = current.Parent;
+            }
+        }
+
+        private string? ResolveDocumentPathFromAncestors(TreeNode node)
+        {
+            if (node.XamlDescriptor is { } selfDescriptor &&
+                TryGetDescriptorDocumentPath(selfDescriptor.Id, out var selfPath) &&
+                !string.IsNullOrWhiteSpace(selfPath))
+            {
+                return selfPath;
+            }
+
+            var current = node;
+
+            while (current is not null)
+            {
+                var info = current.SourceInfo;
+                if (info is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(info.LocalPath))
+                    {
+                        return NormalizeLocalPath(info.LocalPath!);
+                    }
+
+                    if (info.RemoteUri is { } remote &&
+                        _remoteDocumentPaths.TryGetValue(remote.AbsoluteUri, out var cached) &&
+                        !string.IsNullOrWhiteSpace(cached))
+                    {
+                        return cached;
+                    }
+                }
+
+                if (current.XamlDescriptor is { } descriptor &&
+                    TryGetDescriptorDocumentPath(descriptor.Id, out var descriptorPath) &&
+                    !string.IsNullOrWhiteSpace(descriptorPath))
+                {
+                    return descriptorPath;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static string BuildRemoteCacheKey(Uri uri)
+        {
+            return uri.IsAbsoluteUri ? uri.AbsoluteUri : uri.ToString();
+        }
+
+        private async Task<string?> DownloadRemoteDocumentAsync(Uri uri, string cacheKey)
+        {
+            try
+            {
+                var directory = GetRemoteCacheDirectory();
+                Directory.CreateDirectory(directory);
+
+                var extension = Path.GetExtension(uri.AbsolutePath);
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = ".axaml";
+                }
+
+                var fileName = BuildRemoteCacheFileName(uri) + extension;
+                var filePath = Path.Combine(directory, fileName);
+
+                var content = await RemoteDocumentClient.GetStringAsync(uri).ConfigureAwait(false);
+#if NETSTANDARD2_0
+                await WriteAllTextAsyncCompat(filePath, content, Encoding.UTF8).ConfigureAwait(false);
+#else
+                await File.WriteAllTextAsync(filePath, content, Encoding.UTF8).ConfigureAwait(false);
+#endif
+
+                _xamlAstWorkspace.Invalidate(filePath);
+                _remoteDocumentCache.TryRemove(cacheKey, out _);
+
+                return filePath;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string BuildRemoteCacheFileName(Uri uri)
+        {
+#if NETSTANDARD2_0
+            using var sha = SHA256.Create();
+            var hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(uri.AbsoluteUri));
+            return BytesToHex(hashBytes);
+#else
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(uri.AbsoluteUri));
+            return Convert.ToHexString(hash);
+#endif
+        }
+
+        private static string GetRemoteCacheDirectory()
+        {
+            return Path.Combine(Path.GetTempPath(), "DiagnosticsTools", "RemoteSources");
+        }
+
+#if NETSTANDARD2_0
+        private static Task WriteAllTextAsyncCompat(string path, string contents, Encoding encoding)
+        {
+            return Task.Run(() => File.WriteAllText(path, contents, encoding));
+        }
+
+        private static string BytesToHex(byte[] data)
+        {
+            var builder = new StringBuilder(data.Length * 2);
+            foreach (var value in data)
+            {
+                builder.Append(value.ToString("X2", CultureInfo.InvariantCulture));
+            }
+
+            return builder.ToString();
+        }
+#endif
+
+        private async Task TryRegisterDescriptorAsync(TreeNode node, SourceInfo info)
+        {
+            var path = await ResolveDocumentPathAsync(info).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            try
+            {
+                var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
+                var descriptor = ResolveDescriptor(index, node, info);
+                if (descriptor is null)
+                {
+                    return;
+                }
+
+                await Dispatcher.UIThread.InvokeAsync(() => RegisterXamlDescriptor(node, descriptor, path), DispatcherPriority.Background);
+                _documentNodeIndices.TryRemove(GetDocumentKey(info) ?? string.Empty, out _);
+            }
+            catch
+            {
+                // Descriptor resolution is best-effort.
+            }
+        }
+
+        private void RegisterXamlDescriptor(TreeNode node, XamlAstNodeDescriptor? descriptor, string? documentPath = null)
         {
             lock (_nodesByXamlId)
             {
-                if (node.XamlDescriptor is { } existing &&
-                    _nodesByXamlId.TryGetValue(existing.Id, out var mapped) &&
-                    ReferenceEquals(mapped, node))
+                if (node.XamlDescriptor is { } previous)
                 {
-                    _nodesByXamlId.Remove(existing.Id);
+                    if (_nodesByXamlId.TryGetValue(previous.Id, out var mapped) &&
+                        ReferenceEquals(mapped, node))
+                    {
+                        _nodesByXamlId.Remove(previous.Id);
+                    }
+
+                    if (descriptor is null || !descriptor.Id.Equals(previous.Id))
+                    {
+                        _descriptorDocuments.Remove(previous.Id);
+                    }
                 }
 
                 node.UpdateXamlDescriptor(descriptor);
@@ -1797,7 +2498,19 @@ namespace Avalonia.Diagnostics.ViewModels
                 if (descriptor is not null)
                 {
                     _nodesByXamlId[descriptor.Id] = node;
+                    if (!string.IsNullOrWhiteSpace(documentPath))
+                    {
+                        _descriptorDocuments[descriptor.Id] = documentPath!;
+                    }
                 }
+            }
+        }
+
+        private bool TryGetDescriptorDocumentPath(XamlAstNodeId id, out string? path)
+        {
+            lock (_nodesByXamlId)
+            {
+                return _descriptorDocuments.TryGetValue(id, out path);
             }
         }
 
@@ -1808,7 +2521,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 return null;
             }
 
-            var path = info.LocalPath;
+            var path = await ResolveDocumentPathAsync(info).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(path))
             {
                 return null;
@@ -2213,6 +2926,8 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
+            InvalidateDocumentIndices(e.Path);
+
             var currentPath = ResolveSelectedDocumentPath();
             if (string.IsNullOrWhiteSpace(currentPath) || !PathsEqual(currentPath!, e.Path))
             {
@@ -2233,7 +2948,14 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             if (SelectedNodeSourceInfo?.LocalPath is { } localPath && !string.IsNullOrWhiteSpace(localPath))
             {
-                return localPath!;
+                return NormalizeLocalPath(localPath!);
+            }
+
+            if (SelectedNodeSourceInfo?.RemoteUri is { } remote &&
+                _remoteDocumentPaths.TryGetValue(remote.AbsoluteUri, out var cachedPath) &&
+                !string.IsNullOrWhiteSpace(cachedPath))
+            {
+                return cachedPath;
             }
 
             return SelectedNodeXaml?.Document?.Path;
@@ -2246,6 +2968,11 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
+            if (!string.IsNullOrEmpty(e.Path))
+            {
+                InvalidateDocumentIndices(e.Path!);
+            }
+
             var currentPath = ResolveSelectedDocumentPath();
             if (string.IsNullOrWhiteSpace(currentPath))
             {
@@ -2255,6 +2982,27 @@ namespace Avalonia.Diagnostics.ViewModels
             if (string.IsNullOrEmpty(e.Path) || PathsEqual(currentPath!, e.Path))
             {
                 _ = UpdateSelectedNodeSourceInfoAsync(SelectedNode);
+            }
+        }
+
+        private void InvalidateDocumentIndices(string path)
+        {
+            var normalized = NormalizeLocalPath(path) ?? path;
+            _documentNodeIndices.TryRemove(normalized, out _);
+
+            if (_cachedDocumentRemoteIndex.TryRemove(normalized, out var remoteKey))
+            {
+                _remoteDocumentPaths.TryRemove(remoteKey, out _);
+                _documentNodeIndices.TryRemove(remoteKey, out _);
+                _remoteDocumentCache.TryRemove(remoteKey, out _);
+            }
+
+            if (_remoteDocumentPaths.TryGetValue(path, out var local) && !string.IsNullOrWhiteSpace(local))
+            {
+                _documentNodeIndices.TryRemove(local, out _);
+                _cachedDocumentRemoteIndex.TryRemove(local, out _);
+                _remoteDocumentPaths.TryRemove(path, out _);
+                _remoteDocumentCache.TryRemove(path, out _);
             }
         }
 
@@ -2690,6 +3438,304 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return string.Empty;
+        }
+
+        private sealed class DocumentNodeIndex
+        {
+            private readonly object _gate = new();
+            private readonly List<NodeLookupEntry> _entries = new();
+
+            public void AddOrUpdate(TreeNode node, int startLine, int endLine)
+            {
+                lock (_gate)
+                {
+                    var normalizedEnd = Math.Max(endLine, startLine);
+                    var replacement = new NodeLookupEntry(node, startLine, normalizedEnd);
+                    var existingIndex = _entries.FindIndex(e => ReferenceEquals(e.Node, node));
+                    if (existingIndex >= 0)
+                    {
+                        _entries[existingIndex] = replacement;
+                    }
+                    else
+                    {
+                        _entries.Add(replacement);
+                    }
+                }
+            }
+
+            public void Remove(TreeNode node)
+            {
+                lock (_gate)
+                {
+                    for (var i = _entries.Count - 1; i >= 0; i--)
+                    {
+                        if (ReferenceEquals(_entries[i].Node, node))
+                        {
+                            _entries.RemoveAt(i);
+                        }
+                    }
+                }
+            }
+
+            public bool TryGetBestMatch(int descriptorStart, int descriptorEnd, out TreeNode? node)
+            {
+                lock (_gate)
+                {
+                    NodeLookupEntry? best = null;
+                    var bestEntrySpan = int.MaxValue;
+                    var bestStartDiff = int.MaxValue;
+                    var bestDescriptorSpan = int.MaxValue;
+                    var descriptorSpan = descriptorEnd - descriptorStart;
+                    if (descriptorSpan < 0)
+                    {
+                        descriptorSpan = 0;
+                    }
+
+                    foreach (var entry in _entries)
+                    {
+                        if (descriptorStart < entry.StartLine || descriptorStart > entry.EndLine)
+                        {
+                            continue;
+                        }
+
+                        var span = descriptorEnd - descriptorStart;
+                        if (span < 0)
+                        {
+                            span = 0;
+                        }
+
+                        var startDiff = Math.Abs(entry.StartLine - descriptorStart);
+                        var entrySpan = entry.EndLine - entry.StartLine;
+                        if (entrySpan < 0)
+                        {
+                            entrySpan = 0;
+                        }
+
+                        if (best is null ||
+                            entrySpan < bestEntrySpan ||
+                            (entrySpan == bestEntrySpan && (startDiff < bestStartDiff ||
+                                                            (startDiff == bestStartDiff && descriptorSpan < bestDescriptorSpan))))
+                        {
+                            best = entry;
+                            bestEntrySpan = entrySpan;
+                            bestStartDiff = startDiff;
+                            bestDescriptorSpan = descriptorSpan;
+                        }
+                    }
+
+                    if (best is { } value && (bestStartDiff == 0 || bestEntrySpan == 0))
+                    {
+                        node = value.Node;
+                        return true;
+                    }
+
+                    node = null;
+                    return false;
+                }
+            }
+
+            private readonly struct NodeLookupEntry
+            {
+                public NodeLookupEntry(TreeNode node, int startLine, int endLine)
+                {
+                    Node = node;
+                    StartLine = startLine;
+                    EndLine = endLine;
+                }
+
+                public TreeNode Node { get; }
+                public int StartLine { get; }
+                public int EndLine { get; }
+            }
+        }
+
+        private readonly record struct DocumentReference(
+            TreeNode Node,
+            string? NormalizedPath,
+            string? RemoteKey,
+            int StartLine,
+            int EndLine,
+            XamlAstNodeId? DescriptorId);
+
+        private bool TryBuildDocumentReference(TreeNode node, out DocumentReference reference)
+        {
+            string? normalizedPath = null;
+            string? remoteKey = null;
+            int startLine = -1;
+            int endLine = -1;
+            XamlAstNodeId? descriptorId = null;
+
+            if (node.SourceInfo is { } info)
+            {
+                if (!string.IsNullOrWhiteSpace(info.LocalPath))
+                {
+                    normalizedPath = NormalizeLocalPath(info.LocalPath!);
+                    if (!string.IsNullOrWhiteSpace(normalizedPath))
+                    {
+                        remoteKey = GetRemoteKeyForNormalizedPath(normalizedPath!);
+                    }
+                }
+                else if (info.RemoteUri is { } remoteUri)
+                {
+                    remoteKey = remoteUri.AbsoluteUri;
+                    if (_remoteDocumentPaths.TryGetValue(remoteUri.AbsoluteUri, out var mappedPath))
+                    {
+                        normalizedPath ??= mappedPath;
+                    }
+                }
+
+                if (info.StartLine is int srcStart)
+                {
+                    startLine = srcStart;
+                    endLine = info.EndLine ?? srcStart;
+                }
+            }
+
+            if (node.XamlDescriptor is { } descriptor)
+            {
+                descriptorId = descriptor.Id;
+
+                if (TryGetDescriptorDocumentPath(descriptor.Id, out var descriptorPath) && !string.IsNullOrWhiteSpace(descriptorPath))
+                {
+                    if (File.Exists(descriptorPath))
+                    {
+                        normalizedPath ??= NormalizeLocalPath(descriptorPath);
+                        if (normalizedPath is not null)
+                        {
+                            remoteKey ??= GetRemoteKeyForNormalizedPath(normalizedPath);
+                        }
+                    }
+                    else if (Uri.TryCreate(descriptorPath, UriKind.Absolute, out var descriptorUri))
+                    {
+                        remoteKey ??= descriptorUri.AbsoluteUri;
+                        if (_remoteDocumentPaths.TryGetValue(remoteKey!, out var mappedPath))
+                        {
+                            normalizedPath ??= mappedPath;
+                        }
+                    }
+                    else
+                    {
+                        normalizedPath ??= NormalizeLocalPath(descriptorPath);
+                    }
+                }
+
+                if (startLine < 0)
+                {
+                    startLine = Math.Max(descriptor.LineSpan.Start.Line, 1);
+                    endLine = Math.Max(descriptor.LineSpan.End.Line, startLine);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedPath) && string.IsNullOrWhiteSpace(remoteKey))
+            {
+                reference = default;
+                return false;
+            }
+
+            if (startLine < 0)
+            {
+                startLine = 1;
+            }
+
+            if (endLine < startLine)
+            {
+                endLine = startLine;
+            }
+
+            remoteKey ??= normalizedPath is not null ? GetRemoteKeyForNormalizedPath(normalizedPath) : null;
+
+            reference = new DocumentReference(node, normalizedPath, remoteKey, startLine, endLine, descriptorId);
+            return true;
+        }
+
+        private bool PathMatches(DocumentReference reference, string? selectionNormalized, string? selectionRemoteKey, string? rawSelectionPath)
+        {
+            if (!string.IsNullOrWhiteSpace(selectionNormalized) && !string.IsNullOrWhiteSpace(reference.NormalizedPath))
+            {
+                if (PathsEqual(reference.NormalizedPath!, selectionNormalized!))
+                {
+                    return true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectionRemoteKey))
+            {
+                if (!string.IsNullOrWhiteSpace(reference.RemoteKey) &&
+                    string.Equals(reference.RemoteKey, selectionRemoteKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(reference.NormalizedPath))
+                {
+                    var referenceRemote = GetRemoteKeyForNormalizedPath(reference.NormalizedPath!);
+                    if (!string.IsNullOrWhiteSpace(referenceRemote) &&
+                        string.Equals(referenceRemote, selectionRemoteKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(rawSelectionPath) &&
+                Uri.TryCreate(rawSelectionPath, UriKind.Absolute, out var selectionUri))
+            {
+                var selectionUriString = selectionUri.AbsoluteUri;
+                if (!string.IsNullOrWhiteSpace(reference.RemoteKey) &&
+                    string.Equals(reference.RemoteKey, selectionUriString, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(reference.NormalizedPath) &&
+                    Uri.TryCreate(reference.NormalizedPath, UriKind.Absolute, out var referenceUri) &&
+                    string.Equals(referenceUri.AbsoluteUri, selectionUriString, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectionNormalized) && !string.IsNullOrWhiteSpace(reference.RemoteKey) &&
+                _remoteDocumentPaths.TryGetValue(reference.RemoteKey!, out var mappedPath) &&
+                PathsEqual(mappedPath, selectionNormalized!))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private string? GetRemoteKeyForNormalizedPath(string path)
+        {
+            if (_cachedDocumentRemoteIndex.TryGetValue(path, out var remoteKey) && !string.IsNullOrWhiteSpace(remoteKey))
+            {
+                return remoteKey;
+            }
+
+            foreach (var pair in _remoteDocumentPaths)
+            {
+                if (PathsEqual(pair.Value, path))
+                {
+                    return pair.Key;
+                }
+            }
+
+            return null;
+        }
+
+        private static int ComputeMatchPenalty(DocumentReference reference, int descriptorStart, int descriptorEnd)
+        {
+            var startLine = reference.StartLine;
+            var endLine = reference.EndLine;
+
+            if (startLine <= descriptorStart && descriptorStart <= endLine)
+            {
+                var referenceSpan = endLine - startLine;
+                var selectionSpan = Math.Max(descriptorEnd - descriptorStart, 0);
+                return Math.Abs(referenceSpan - selectionSpan);
+            }
+
+            return Math.Abs(startLine - descriptorStart);
         }
     }
 
