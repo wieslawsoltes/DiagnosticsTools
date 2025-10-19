@@ -82,6 +82,15 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public override TreeNodeCollection Children { get; }
 
+        public bool IsTemplateBranch =>
+            Role == CombinedNodeRole.Template ||
+            Parent is CombinedTreeTemplateGroupNode ||
+            Parent is CombinedTreeNode parentNode && parentNode.IsTemplateBranch;
+
+        public bool IsPopupBranch =>
+            Role == CombinedNodeRole.PopupHost ||
+            Parent is CombinedTreeNode parentNode && parentNode.IsPopupBranch;
+
         public override string SearchText => string.Join(" ", new[]
         {
             base.SearchText,

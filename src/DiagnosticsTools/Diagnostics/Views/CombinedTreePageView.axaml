@@ -11,6 +11,12 @@
     <converters:EnumToCheckedConverter x:Key="EnumToCheckedConverter" />
   </UserControl.Resources>
   <UserControl.Styles>
+    <Style Selector="StackPanel.template-scope">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+    <Style Selector="StackPanel.popup-scope">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
     <Style Selector="StackPanel.search-match TextBlock">
       <Setter Property="Foreground" Value="DodgerBlue" />
     </Style>
@@ -18,7 +24,8 @@
   <UserControl.DataTemplates>
     <DataTemplate DataType="vm:CombinedTreeTemplateGroupNode">
       <StackPanel Orientation="Horizontal" Spacing="8"
-                  Classes.search-match="{Binding IsSearchMatch}">
+                  Classes.search-match="{Binding IsSearchMatch}"
+                  Classes.template-scope="True">
         <TextBlock Text="{Binding Type}"
                    FontStyle="Italic"
                    Foreground="{DynamicResource ThemeForegroundLowBrush}" />
@@ -26,12 +33,20 @@
     </DataTemplate>
     <DataTemplate DataType="vm:CombinedTreeNode">
       <StackPanel Orientation="Horizontal" Spacing="8" Tag="{Binding RoleKey}"
-                  Classes.search-match="{Binding IsSearchMatch}">
+                  Classes.search-match="{Binding IsSearchMatch}"
+                  Classes.template-scope="{Binding IsTemplateBranch}"
+                  Classes.popup-scope="{Binding IsPopupBranch}">
         <StackPanel.Styles>
           <Style Selector="StackPanel[Tag=Template]">
-            <Setter Property="Opacity" Value="0.75" />
+            <Setter Property="Opacity" Value="0.6" />
           </Style>
           <Style Selector="StackPanel[Tag=Template] TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
+          </Style>
+          <Style Selector="StackPanel[Tag=PopupHost]">
+            <Setter Property="Opacity" Value="0.6" />
+          </Style>
+          <Style Selector="StackPanel[Tag=PopupHost] TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundLowBrush}" />
           </Style>
         </StackPanel.Styles>
