@@ -2567,20 +2567,64 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             var nameCandidates = GetCandidatesByName(index, node);
             var descriptor = TryResolveWithStructuralHints(nameCandidates, node, info);
-            if (descriptor is not null)
+            if (descriptor is not null && DescriptorMatchesNode(node, descriptor))
             {
                 return descriptor;
+            }
+
+            if (descriptor is null || !DescriptorMatchesNode(node, descriptor))
+            {
+                var matchingByName = nameCandidates.FirstOrDefault(c => DescriptorMatchesNode(node, c));
+                if (matchingByName is not null)
+                {
+                    return matchingByName;
+                }
             }
 
             var lineCandidates = GetCandidatesByLine(index, info);
             descriptor = TryResolveWithStructuralHints(lineCandidates, node, info);
-            if (descriptor is not null)
+            if (descriptor is not null && DescriptorMatchesNode(node, descriptor))
             {
                 return descriptor;
             }
 
+            if (descriptor is null || !DescriptorMatchesNode(node, descriptor))
+            {
+                var matchingByLine = lineCandidates.FirstOrDefault(c => DescriptorMatchesNode(node, c));
+                if (matchingByLine is not null)
+                {
+                    return matchingByLine;
+                }
+            }
+
             var allCandidates = index.Nodes.ToList();
             return TryResolveWithStructuralHints(allCandidates, node, info);
+        }
+
+        private static bool DescriptorMatchesNode(TreeNode node, XamlAstNodeDescriptor descriptor)
+        {
+            var expectedName = node.Visual?.GetType().Name ?? node.Type;
+            if (string.IsNullOrWhiteSpace(expectedName))
+            {
+                return true;
+            }
+
+            if (string.Equals(descriptor.LocalName, expectedName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(descriptor.QualifiedName))
+            {
+                var segments = descriptor.QualifiedName.Split(':');
+                var simpleName = segments.Length > 0 ? segments[segments.Length - 1] : descriptor.QualifiedName;
+                if (string.Equals(simpleName, expectedName, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static IReadOnlyList<XamlAstNodeDescriptor> GetCandidatesByName(IXamlAstIndex index, TreeNode node)
