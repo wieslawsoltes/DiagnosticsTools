@@ -289,6 +289,17 @@
           <Separator Width="8" />
           <TextBlock>Pointer Over:</TextBlock>
           <TextBlock Text="{Binding PointerOverElementName}" />
+          <Separator Width="8"
+                     IsVisible="{Binding ShowTreeStats}" />
+          <StackPanel Orientation="Horizontal"
+                      Spacing="4"
+                      IsVisible="{Binding ShowTreeStats}">
+            <TextBlock>Tree:</TextBlock>
+            <TextBlock Text="{Binding TreeTotalNodeCount}" />
+            <TextBlock Text="total," />
+            <TextBlock Text="{Binding TreeExpandedNodeCount}" />
+            <TextBlock Text="expanded" />
+          </StackPanel>
         </StackPanel>
 
         <TextBlock Grid.Column="1"

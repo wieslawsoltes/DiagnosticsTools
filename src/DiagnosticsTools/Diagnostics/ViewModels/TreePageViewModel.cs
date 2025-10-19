@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -33,6 +35,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private TreeNode[] _nodes;
         private readonly TreeNode[] _rootNodes;
         private readonly Dictionary<XamlAstNodeId, TreeNode> _nodesByXamlId = new();
+        private readonly HashSet<TreeNode> _trackedNodes = new();
         private readonly XamlAstWorkspace _xamlAstWorkspace;
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
         private TreeNode? _scopedRoot;
@@ -76,6 +79,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly ConcurrentDictionary<string, string> _cachedDocumentRemoteIndex = new(StringComparer.OrdinalIgnoreCase);
         private static readonly HttpClient RemoteDocumentClient = new();
         private readonly Dictionary<XamlAstNodeId, string> _descriptorDocuments = new();
+        private int _totalNodeCount;
+        private int _expandedNodeCount;
         internal enum SubtreePasteMode
         {
             Child,
@@ -128,6 +133,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _removeFromMultiSelectionCommand = new DelegateCommand(RemoveSelectedNodeFromMultiSelection, () => CanRemoveFromMultiSelection);
             _clearMultiSelectionCommand = new DelegateCommand(ClearMultiSelection, () => HasMultiSelection);
             _editTemplateCommand = new DelegateCommand(EditTemplateAsync, () => CanEditTemplate);
+            RebuildNodeSubscriptions();
+            UpdateTreeStats();
         }
 
     public event EventHandler<string>? ClipboardCopyRequested;
@@ -144,7 +151,26 @@ namespace Avalonia.Diagnostics.ViewModels
         public TreeNode[] Nodes
         {
             get => _nodes;
-            protected set => RaiseAndSetIfChanged(ref _nodes, value);
+            protected set
+            {
+                if (RaiseAndSetIfChanged(ref _nodes, value))
+                {
+                    RebuildNodeSubscriptions();
+                    UpdateTreeStats();
+                }
+            }
+        }
+
+        public int TotalNodeCount
+        {
+            get => _totalNodeCount;
+            private set => RaiseAndSetIfChanged(ref _totalNodeCount, value);
+        }
+
+        public int ExpandedNodeCount
+        {
+            get => _expandedNodeCount;
+            private set => RaiseAndSetIfChanged(ref _expandedNodeCount, value);
         }
 
         public IReadOnlyList<TreeNode> MultiSelection => _multiSelection;
@@ -387,6 +413,7 @@ namespace Avalonia.Diagnostics.ViewModels
         public void Dispose()
         {
             ClearMultiSelection();
+            ClearNodeSubscriptions();
 
             foreach (var node in Nodes)
             {
@@ -3407,6 +3434,149 @@ namespace Avalonia.Diagnostics.ViewModels
             var copy = new TreeNode[_rootNodes.Length];
             Array.Copy(_rootNodes, copy, _rootNodes.Length);
             Nodes = copy;
+        }
+
+        private void RebuildNodeSubscriptions()
+        {
+            ClearNodeSubscriptions();
+
+            if (_nodes is null)
+            {
+                return;
+            }
+
+            foreach (var root in _nodes)
+            {
+                SubscribeNodeRecursive(root);
+            }
+        }
+
+        private void ClearNodeSubscriptions()
+        {
+            if (_trackedNodes.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var node in _trackedNodes.ToArray())
+            {
+                node.PropertyChanged -= OnNodePropertyChanged;
+                node.CollectionChanged -= OnNodeCollectionChanged;
+            }
+
+            _trackedNodes.Clear();
+        }
+
+        private void SubscribeNodeRecursive(TreeNode node)
+        {
+            if (!_trackedNodes.Add(node))
+            {
+                return;
+            }
+
+            node.PropertyChanged += OnNodePropertyChanged;
+            node.CollectionChanged += OnNodeCollectionChanged;
+
+            foreach (var child in node.Children)
+            {
+                SubscribeNodeRecursive(child);
+            }
+        }
+
+        private void UnsubscribeNodeRecursive(TreeNode node)
+        {
+            if (!_trackedNodes.Remove(node))
+            {
+                return;
+            }
+
+            node.PropertyChanged -= OnNodePropertyChanged;
+            node.CollectionChanged -= OnNodeCollectionChanged;
+
+            foreach (var child in node.Children)
+            {
+                UnsubscribeNodeRecursive(child);
+            }
+        }
+
+        private void OnNodePropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not TreeNode)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(e.PropertyName) ||
+                e.PropertyName == nameof(TreeNode.IsExpanded) ||
+                e.PropertyName == nameof(TreeNode.IsVisible))
+            {
+                UpdateTreeStats();
+            }
+        }
+
+        private void OnNodeCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action == NotifyCollectionChangedAction.Reset)
+            {
+                RebuildNodeSubscriptions();
+                UpdateTreeStats();
+                return;
+            }
+
+            if (e.NewItems is not null)
+            {
+                foreach (var node in e.NewItems.OfType<TreeNode>())
+                {
+                    SubscribeNodeRecursive(node);
+                }
+            }
+
+            if (e.OldItems is not null)
+            {
+                foreach (var node in e.OldItems.OfType<TreeNode>())
+                {
+                    UnsubscribeNodeRecursive(node);
+                }
+            }
+
+            UpdateTreeStats();
+        }
+
+        private void UpdateTreeStats()
+        {
+            var total = 0;
+            var expanded = 0;
+
+            if (_nodes is not null)
+            {
+                foreach (var root in _nodes)
+                {
+                    CountNode(root, ref total, ref expanded);
+                }
+            }
+
+            TotalNodeCount = total;
+            ExpandedNodeCount = expanded;
+        }
+
+        private static void CountNode(TreeNode node, ref int total, ref int expanded)
+        {
+            if (!node.IsVisible)
+            {
+                return;
+            }
+
+            total++;
+
+            if (node.IsExpanded)
+            {
+                expanded++;
+            }
+
+            foreach (var child in node.Children)
+            {
+                CountNode(child, ref total, ref expanded);
+            }
         }
 
         private bool NodeMatchesFilter(TreeNode node)

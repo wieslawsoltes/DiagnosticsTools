@@ -66,6 +66,10 @@ namespace Avalonia.Diagnostics.ViewModels
     private const string CombinedTreeOwnerId = "Tree.Combined";
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
         private readonly SelectionCoordinator _selectionCoordinator;
+        private TreePageViewModel? _activeTree;
+        private bool _showTreeStats;
+        private int _treeTotalNodeCount;
+        private int _treeExpandedNodeCount;
 
         internal XamlAstWorkspace XamlAstWorkspace => _xamlAstWorkspace;
 
@@ -272,6 +276,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 }
 
                 RaiseAndSetIfChanged(ref _content, value);
+                UpdateActiveTree(value as TreePageViewModel);
             }
         }
 
@@ -337,6 +342,24 @@ namespace Avalonia.Diagnostics.ViewModels
             private set => RaiseAndSetIfChanged(ref _pointerOverElementName, value);
         }
 
+        public bool ShowTreeStats
+        {
+            get => _showTreeStats;
+            private set => RaiseAndSetIfChanged(ref _showTreeStats, value);
+        }
+
+        public int TreeTotalNodeCount
+        {
+            get => _treeTotalNodeCount;
+            private set => RaiseAndSetIfChanged(ref _treeTotalNodeCount, value);
+        }
+
+        public int TreeExpandedNodeCount
+        {
+            get => _treeExpandedNodeCount;
+            private set => RaiseAndSetIfChanged(ref _treeExpandedNodeCount, value);
+        }
+
         public void ShowHotKeys()
         {
             SelectedTab = 5;
@@ -349,6 +372,57 @@ namespace Avalonia.Diagnostics.ViewModels
             tree?.SelectControl(control);
         }
 
+        private void UpdateActiveTree(TreePageViewModel? tree)
+        {
+            if (!ReferenceEquals(_activeTree, tree))
+            {
+                if (_activeTree is not null)
+                {
+                    _activeTree.PropertyChanged -= OnActiveTreePropertyChanged;
+                }
+
+                _activeTree = tree;
+
+                if (_activeTree is not null)
+                {
+                    _activeTree.PropertyChanged += OnActiveTreePropertyChanged;
+                }
+            }
+
+            if (_activeTree is not null)
+            {
+                ShowTreeStats = true;
+                TreeTotalNodeCount = _activeTree.TotalNodeCount;
+                TreeExpandedNodeCount = _activeTree.ExpandedNodeCount;
+            }
+            else
+            {
+                ShowTreeStats = false;
+                TreeTotalNodeCount = 0;
+                TreeExpandedNodeCount = 0;
+            }
+        }
+
+        private void OnActiveTreePropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not TreePageViewModel tree || !ReferenceEquals(tree, _activeTree))
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(e.PropertyName) ||
+                e.PropertyName == nameof(TreePageViewModel.TotalNodeCount))
+            {
+                TreeTotalNodeCount = tree.TotalNodeCount;
+            }
+
+            if (string.IsNullOrEmpty(e.PropertyName) ||
+                e.PropertyName == nameof(TreePageViewModel.ExpandedNodeCount))
+            {
+                TreeExpandedNodeCount = tree.ExpandedNodeCount;
+            }
+        }
+
         public void EnableSnapshotStyles(bool enable)
         {
             if (Content is TreePageViewModel treeVm && treeVm.Details != null)
@@ -359,6 +433,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void Dispose()
         {
+            UpdateActiveTree(null);
             _propertyChangeEmitter.ChangeCompleted -= OnMutationCompleted;
             _propertyChangeEmitter.ExternalDocumentChanged -= OnExternalDocumentChanged;
             if (_roslynWorkspace is not null && _workspaceChangedHandler is not null)
