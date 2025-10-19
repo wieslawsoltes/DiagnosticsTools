@@ -2,8 +2,8 @@
 
 Cross-platform diagnostics, inspection, and tooling for Avalonia UI applications.
 
-[![CI](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/ci.yml/badge.svg)](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/ci.yml)
-[![Release](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/release.yml/badge.svg)](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/release.yml)
+[![CI](https://github.com/wieslawsoltes/DiagnosticsTools/actions/workflows/ci.yml/badge.svg)](https://github.com/wieslawsoltes/DiagnosticsTools/actions/workflows/ci.yml)
+[![Release](https://github.com/wieslawsoltes/DiagnosticsTools/actions/workflows/release.yml/badge.svg)](https://github.com/wieslawsoltes/DiagnosticsTools/actions/workflows/release.yml)
 
 ## Overview
 
