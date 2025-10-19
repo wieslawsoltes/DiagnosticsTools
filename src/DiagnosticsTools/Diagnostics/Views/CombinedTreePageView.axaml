@@ -115,7 +115,7 @@
                                                SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
                                                PointerMoved="UpdateAdorner"
                                                PointerExited="RemoveAdorner">
-        <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
+      <virtualizedTreeView:VirtualizedTreeView.ContextFlyout>
           <MenuFlyout>
             <MenuItem Header="Preview source"
                       Command="{Binding PreviewSourceCommand}"
@@ -123,11 +123,35 @@
             <MenuItem Header="Navigate to source"
                       Command="{Binding NavigateToSourceCommand}"
                       IsEnabled="{Binding CanNavigateToSource}" />
+            <MenuItem Header="Delete node"
+                      Command="{Binding DeleteNodeCommand}"
+                      IsEnabled="{Binding CanDeleteNode}" />
+            <MenuItem Header="Edit template (live preview)"
+                      Command="{Binding EditTemplateCommand}"
+                      IsEnabled="{Binding CanEditTemplate}" />
+            <MenuItem Header="Add to multi-selection"
+                      Command="{Binding AddToMultiSelectionCommand}"
+                      IsEnabled="{Binding CanAddToMultiSelection}" />
+            <MenuItem Header="Remove from multi-selection"
+                      Command="{Binding RemoveFromMultiSelectionCommand}"
+                      IsEnabled="{Binding CanRemoveFromMultiSelection}" />
+            <MenuItem Header="Clear multi-selection"
+                      Command="{Binding ClearMultiSelectionCommand}"
+                      IsEnabled="{Binding HasMultiSelection}" />
             <MenuItem Header="-" />
             <MenuItem Header="Copy">
               <MenuItem Header="Copy individual node selector" Command="{Binding CopySelector}" />
               <MenuItem Header="Copy selector from template parent" Command="{Binding CopySelectorFromTemplateParent}" />
             </MenuItem>
+            <MenuItem Header="Copy subtree XAML"
+                      IsEnabled="{Binding CanCopySubtree}"
+                      Click="CopySubtreeClick" />
+            <MenuItem Header="Paste subtree as child"
+                      IsEnabled="{Binding CanPasteSubtree}"
+                      Click="PasteSubtreeChildClick" />
+            <MenuItem Header="Paste subtree as sibling"
+                      IsEnabled="{Binding CanPasteSubtree}"
+                      Click="PasteSubtreeSiblingClick" />
             <MenuItem Header="-" />
             <MenuItem Header="Scope to this subtree"
                       Command="{Binding ScopeToSubTree}"

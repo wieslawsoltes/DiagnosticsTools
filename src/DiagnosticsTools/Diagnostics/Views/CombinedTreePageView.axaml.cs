@@ -3,8 +3,10 @@ using Avalonia.Diagnostics;
 using Avalonia.Diagnostics.Controls.VirtualizedTreeView;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.LogicalTree;
 using Avalonia.Markup.Xaml;
+using System.Threading.Tasks;
 
 namespace Avalonia.Diagnostics.Views
 {
@@ -123,6 +125,56 @@ namespace Avalonia.Diagnostics.Views
         private void OnSourcePreviewRequested(object? sender, SourcePreviewViewModel e)
         {
             SourcePreviewWindow.Show(TopLevel.GetTopLevel(this), e);
+        }
+
+        private async void CopySubtreeClick(object? sender, RoutedEventArgs e)
+        {
+            if (DataContext is not TreePageViewModel viewModel)
+            {
+                return;
+            }
+
+            var text = await viewModel.TryGetSelectedSubtreeXamlAsync();
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            {
+                await ClipboardUtilities.SetTextAsync(clipboard, text);
+            }
+        }
+
+        private async void PasteSubtreeChildClick(object? sender, RoutedEventArgs e)
+        {
+            await PasteSubtreeAsync(TreePageViewModel.SubtreePasteMode.Child);
+        }
+
+        private async void PasteSubtreeSiblingClick(object? sender, RoutedEventArgs e)
+        {
+            await PasteSubtreeAsync(TreePageViewModel.SubtreePasteMode.Sibling);
+        }
+
+        private async Task PasteSubtreeAsync(TreePageViewModel.SubtreePasteMode mode)
+        {
+            if (DataContext is not TreePageViewModel viewModel)
+            {
+                return;
+            }
+
+            if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            {
+                return;
+            }
+
+            var text = await clipboard.GetTextAsync();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            await viewModel.PasteSubtreeAsync(text, mode);
         }
     }
 }
