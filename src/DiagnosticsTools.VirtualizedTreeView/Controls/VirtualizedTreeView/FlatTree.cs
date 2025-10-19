@@ -155,6 +155,10 @@ public class FlatTree : IReadOnlyList<FlatTreeNode>,
         var nodeIndex = IndexOfNode(node);
         if (nodeIndex < 0)
         {
+            if (!node.IsExpanded)
+            {
+                _expanded.Remove(node);
+            }
             return;
         }
         var flatNode = _flatTree[nodeIndex];
@@ -173,6 +177,17 @@ public class FlatTree : IReadOnlyList<FlatTreeNode>,
                 return;
 
             var removedItemsCount = CountExpandedChildren(node);
+            if (removedItemsCount <= 0)
+            {
+                return;
+            }
+
+            removedItemsCount = Math.Min(removedItemsCount, _flatTree.Count - (nodeIndex + 1));
+            if (removedItemsCount <= 0)
+            {
+                return;
+            }
+
             var removedItems = _flatTree.GetRange(nodeIndex + 1, removedItemsCount);
             foreach (var item in removedItems)
             {
