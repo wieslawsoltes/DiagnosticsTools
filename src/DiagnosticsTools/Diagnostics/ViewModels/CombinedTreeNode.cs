@@ -529,7 +529,7 @@ namespace Avalonia.Diagnostics.ViewModels
             private readonly Action<int, Visual, string?, string?, AvaloniaObject?> _add;
             private readonly Action<Visual> _remove;
             private readonly Action _reset;
-            private readonly CompositeDisposable _subscriptions = new(1);
+            private IDisposable? _subscription;
 
             private CombinedTemplateChildrenTracker(
                 CombinedTreeNode owner,
@@ -562,11 +562,10 @@ namespace Avalonia.Diagnostics.ViewModels
 
             private void Initialize(Visual visual)
             {
-                _subscriptions.Add(
-                    visual.VisualChildren.ForEachItem(
-                        (index, child) => OnVisualAdded(index, (Visual)child!),
-                        (index, child) => OnVisualRemoved((Visual)child!),
-                        () => _reset()));
+                _subscription = visual.VisualChildren.ForEachItem(
+                    (index, child) => OnVisualAdded(index, (Visual)child!),
+                    (index, child) => OnVisualRemoved((Visual)child!),
+                    () => _reset());
             }
 
             private void OnVisualAdded(int index, Visual visual)
@@ -590,7 +589,9 @@ namespace Avalonia.Diagnostics.ViewModels
 
             public void Dispose()
             {
-                _subscriptions.Dispose();
+                var subscription = _subscription;
+                _subscription = null;
+                subscription?.Dispose();
             }
         }
 
@@ -598,7 +599,7 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             private readonly Action<Control, string?> _set;
             private readonly Action _clear;
-            private readonly CompositeDisposable _subscriptions = new(1);
+            private IDisposable? _subscription;
 
             private CombinedPopupChildrenTracker(Action<Control, string?> set, Action clear)
             {
@@ -629,23 +630,24 @@ namespace Avalonia.Diagnostics.ViewModels
                     return;
                 }
 
-                _subscriptions.Add(
-                    popupObservable.Subscribe(popupRoot =>
+                _subscription = popupObservable.Subscribe(popupRoot =>
+                {
+                    if (popupRoot is { Root: { } root })
                     {
-                        if (popupRoot is { Root: { } root })
-                        {
-                            _set(root, popupRoot.Value.CustomName);
-                        }
-                        else
-                        {
-                            _clear();
-                        }
-                    }));
+                        _set(root, popupRoot.Value.CustomName);
+                    }
+                    else
+                    {
+                        _clear();
+                    }
+                });
             }
 
             public void Dispose()
             {
-                _subscriptions.Dispose();
+                var subscription = _subscription;
+                _subscription = null;
+                subscription?.Dispose();
             }
 
             private static IObservable<PopupRootInfo?>? GetHostedPopupRootObservable(Visual visual)
