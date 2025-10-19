@@ -29,7 +29,7 @@
     <GenerateDocumentationFile Condition="'$(GenerateDocumentationFile)' == ''">true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <VersionPrefix Condition="'$(VersionPrefix)' == ''">11.3.7</VersionPrefix>
-    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta.2</VersionSuffix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta.3</VersionSuffix>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(_NormalizedProjectDir)' != '' and $(_NormalizedProjectDir.Contains('/src/DiagnosticsTools.'))">
