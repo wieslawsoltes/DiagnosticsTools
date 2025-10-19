@@ -220,50 +220,180 @@ public class FlatTree : IReadOnlyList<FlatTreeNode>,
         if (!IsExpanded(parent))
             return;
 
-        if (e.Action == NotifyCollectionChangedAction.Add)
+        switch (e.Action)
         {
+            case NotifyCollectionChangedAction.Add:
+                HandleAdd();
+                break;
+            case NotifyCollectionChangedAction.Remove:
+                HandleRemove();
+                break;
+            case NotifyCollectionChangedAction.Replace:
+                HandleReplace();
+                break;
+            case NotifyCollectionChangedAction.Move:
+                HandleMove();
+                break;
+            case NotifyCollectionChangedAction.Reset:
+                HandleReset();
+                break;
+        }
+
+        void HandleAdd()
+        {
+            if (e.NewItems == null || e.NewItems.Count == 0)
+                return;
+
             var startIndex = indexOfParent + 1 + CountExpandedChildren(parent, e.NewStartingIndex);
-            var index = startIndex;
-            for (int i = 0; i < e.NewItems!.Count; i++)
+            var insertIndex = startIndex;
+            for (int i = 0; i < e.NewItems.Count; i++)
             {
-                index += InsertNode(flatParent.Node.Children[e.NewStartingIndex + i], flatParent.Level + 1, index);
+                insertIndex += InsertNode(flatParent.Node.Children[e.NewStartingIndex + i], flatParent.Level + 1, insertIndex);
             }
-            var count = index - startIndex;
-            if (count > 0)
+
+            var addedCount = insertIndex - startIndex;
+            if (addedCount <= 0)
+                return;
+
+            var newItems = _flatTree.GetRange(startIndex, addedCount);
+            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startIndex));
+        }
+
+        void HandleRemove()
+        {
+            if (e.OldItems == null || e.OldItems.Count == 0)
+                return;
+
+            var startIndex = indexOfParent + 1 + CountExpandedChildren(parent, e.OldStartingIndex);
+            var removeCount = CalculateRemoveCount(startIndex, e.OldItems.Count);
+            if (removeCount <= 0)
+                return;
+
+            var removedItems = _flatTree.GetRange(startIndex, removeCount);
+            foreach (var item in removedItems)
             {
-                var newItems = _flatTree.GetRange(startIndex, count);
+                UnsubscribeFromNode(item.Node);
+            }
+
+            _flatTree.RemoveRange(startIndex, removeCount);
+            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removedItems, startIndex));
+        }
+
+        void HandleReplace()
+        {
+            if (e.OldItems == null || e.NewItems == null)
+                return;
+
+            var startIndex = indexOfParent + 1 + CountExpandedChildren(parent, e.OldStartingIndex);
+            var removeCount = CalculateRemoveCount(startIndex, e.OldItems.Count);
+            var removedItems = removeCount > 0
+                ? _flatTree.GetRange(startIndex, removeCount)
+                : new List<FlatTreeNode>();
+
+            if (removeCount > 0)
+            {
+                foreach (var item in removedItems)
+                    UnsubscribeFromNode(item.Node);
+
+                _flatTree.RemoveRange(startIndex, removeCount);
+            }
+
+            var insertIndex = startIndex;
+            for (int i = 0; i < e.NewItems.Count; i++)
+            {
+                insertIndex += InsertNode(flatParent.Node.Children[e.NewStartingIndex + i], flatParent.Level + 1, insertIndex);
+            }
+
+            var addedCount = insertIndex - startIndex;
+            IList newItems = addedCount > 0
+                ? _flatTree.GetRange(startIndex, addedCount)
+                : Array.Empty<FlatTreeNode>();
+
+            if (removedItems.Count == 0 && newItems.Count == 0)
+                return;
+
+            if (removedItems.Count == 0)
+            {
                 CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startIndex));
             }
+            else if (newItems.Count == 0)
+            {
+                CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removedItems, startIndex));
+            }
+            else
+            {
+                CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Replace, newItems, removedItems, startIndex));
+            }
         }
-        else if (e.Action == NotifyCollectionChangedAction.Remove)
+
+        void HandleMove()
         {
-            var startIndex = indexOfParent + 1 + CountExpandedChildren(parent, e.OldStartingIndex);
+            if (e.OldItems == null || e.OldItems.Count == 0)
+                return;
+
+            var firstMovedNode = (ITreeNode)e.OldItems[0]!;
+            var removeIndex = IndexOfNode(firstMovedNode);
+            if (removeIndex < 0)
+                return;
+
+            var moveCount = CalculateRemoveCount(removeIndex, e.OldItems.Count);
+            if (moveCount <= 0)
+                return;
+
+            var movedItems = _flatTree.GetRange(removeIndex, moveCount);
+            _flatTree.RemoveRange(removeIndex, moveCount);
+
+            var insertIndex = indexOfParent + 1 + CountExpandedChildren(parent, e.NewStartingIndex);
+            if (insertIndex < 0)
+                insertIndex = 0;
+            else if (insertIndex > _flatTree.Count)
+                insertIndex = _flatTree.Count;
+
+            _flatTree.InsertRange(insertIndex, movedItems);
+            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Move, movedItems, insertIndex, removeIndex));
+        }
+
+        void HandleReset()
+        {
+            var startIndex = indexOfParent + 1;
+            var removeCount = 0;
+            while (startIndex + removeCount < _flatTree.Count && _flatTree[startIndex + removeCount].Level > flatParent.Level)
+            {
+                var node = _flatTree[startIndex + removeCount].Node;
+                if (IsExpanded(node))
+                    removeCount += CountExpandedChildren(node);
+                removeCount++;
+            }
+
+            if (removeCount > 0)
+            {
+                var removedItems = _flatTree.GetRange(startIndex, removeCount);
+                foreach (var item in removedItems)
+                    UnsubscribeFromNode(item.Node);
+
+                _flatTree.RemoveRange(startIndex, removeCount);
+            }
+
+            InsertChildren(flatParent, startIndex);
+            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        }
+
+        int CalculateRemoveCount(int startIndex, int itemsCount)
+        {
             var count = 0;
-            for (int i = 0; i < e.OldItems!.Count; i++)
+            for (int i = 0; i < itemsCount; i++)
             {
                 if (startIndex + count >= _flatTree.Count)
-                {
                     break;
-                }
 
                 var child = _flatTree[startIndex + count].Node;
                 if (IsExpanded(child))
                     count += CountExpandedChildren(child);
                 count++;
             }
-            if (count > 0)
-            {
-                var removedItems = _flatTree.GetRange(startIndex, count);
-                foreach (var item in removedItems)
-                {
-                    UnsubscribeFromNode(item.Node);
-                }
-                _flatTree.RemoveRange(startIndex, count);
-                CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removedItems, startIndex));
-            }
+
+            return count;
         }
-        else
-            throw new NotImplementedException();
     }
 
     public IEnumerator<FlatTreeNode> GetEnumerator() => _flatTree.GetEnumerator();
