@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>DiagnosticsTools.Core</AssemblyName>
@@ -6,6 +6,7 @@
     <PackageId>DiagnosticsTools.Core</PackageId>
     <Description>Shared utility helpers used across DiagnosticsTools packages.</Description>
     <PackageTags>avalonia;diagnostics;utilities</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

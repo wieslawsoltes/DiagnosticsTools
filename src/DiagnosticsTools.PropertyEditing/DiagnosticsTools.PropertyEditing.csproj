@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>DiagnosticsTools.PropertyEditing</AssemblyName>
@@ -6,6 +6,7 @@
     <PackageId>DiagnosticsTools.PropertyEditing</PackageId>
     <Description>Mutation orchestration, journaling, and inspector infrastructure extracted from DiagnosticsTools.</Description>
     <PackageTags>avalonia;diagnostics;property-editing;xaml</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

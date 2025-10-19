@@ -1,83 +1,117 @@
 # DiagnosticsTools
 
-A standalone diagnostic tools library for Avalonia UI applications, extracted from the core Avalonia repository.
+Cross-platform diagnostics, inspection, and tooling for Avalonia UI applications.
 
-## About
+[![CI](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/ci.yml/badge.svg)](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/ci.yml)
+[![Release](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/release.yml/badge.svg)](https://github.com/AvaloniaUI/DiagnosticsTools/actions/workflows/release.yml)
 
-This project is based on the original `Avalonia.Diagnostics` code from the [AvaloniaUI repository](https://github.com/AvaloniaUI/Avalonia). It has been extracted into a standalone project that uses Avalonia NuGet packages instead of project references, making it easier to develop and maintain diagnostic tools independently.
+## Overview
 
-## Original Source
+DiagnosticsTools originated from the `Avalonia.Diagnostics` module inside the [AvaloniaUI](https://github.com/AvaloniaUI/Avalonia) repository.  
+The tooling has been extracted into a dedicated solution so that developers can compose the DevTools experience, or reuse the supporting libraries, without taking a hard dependency on the main Avalonia repo.
 
-The original code can be found in the main Avalonia repository:
-- **Repository**: https://github.com/AvaloniaUI/Avalonia
-- **Original Location**: `src/Avalonia.Diagnostics`
+The solution ships a suite of NuGet packages targeting `netstandard2.0`, `net6.0`, and `net8.0`. Each package is self-contained and can be consumed independently.
 
-## License
+## Package Catalog
 
-This project is distributed under the MIT License. See [LICENSE.TXT](./LICENSE.TXT) for details.
+| Package | Description | Latest |
+| --- | --- | --- |
+| DiagnosticsTools | Full DevTools experience with visual tree inspection, live property editing, and layout analyzers. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools) |
+| DiagnosticsTools.Core | Shared converters, value helpers, and rendering extensions consumed across the stack. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.Core.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.Core) |
+| DiagnosticsTools.PropertyEditing | XAML mutation dispatcher, property inspector emitters, and telemetry hooks. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.PropertyEditing.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.PropertyEditing) |
+| DiagnosticsTools.Runtime | Runtime mutation coordinator with undo/redo and tree abstractions. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.Runtime.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.Runtime) |
+| DiagnosticsTools.Input | Hot-key registration, command routing helpers, and input gesture abstractions. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.Input.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.Input) |
+| DiagnosticsTools.VirtualizedTreeView | High-performance virtualized tree view control and related helpers. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.VirtualizedTreeView.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.VirtualizedTreeView) |
+| DiagnosticsTools.Screenshots | Screenshot capture helpers and default file picker integrations. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.Screenshots.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.Screenshots) |
+| DiagnosticsTools.SourceNavigation | Portable PDB + SourceLink resolution and source info APIs. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.SourceNavigation.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.SourceNavigation) |
+| DiagnosticsTools.XamlAst | XAML workspace, diagnostics, and mutation primitives. | [![NuGet](https://img.shields.io/nuget/v/DiagnosticsTools.XamlAst.svg?style=flat&label=NuGet)](https://www.nuget.org/packages/DiagnosticsTools.XamlAst) |
 
-Portions of the code were ported from the Avalonia Diagnostics tooling in the AvaloniaUI/Avalonia repository.
+See the [per-package documentation](#documentation) for details, quick-start guides, and deep dives.
 
-## Features
+## Feature Highlights
 
-- DevTools window with visual tree inspection
-- Property editor for runtime UI manipulation
-- Layout explorer with visual guidelines
-- Event monitoring and debugging
-- Hot key configuration
-- Style and resource inspection
+- Visual tree inspection, live property editing, and layout analysis for Avalonia apps.
+- Reusable runtime mutation, telemetry, and source navigation infrastructure.
+- Production-ready virtualized tree view control capable of handling large hierarchies.
+- Headless testing utilities for asserting diagnostics outside of a UI shell.
+- Targets modern TFMs with deterministic builds, SourceLink, and symbol packages.
 
-## Reusable Libraries
+## Quick Start
 
-DiagnosticsTools now ships a suite of standalone libraries that can be reused outside the DevTools application. Most packages target `netstandard2.0`, `net6.0`, and `net8.0`.
-
-- [`DiagnosticsTools.Core`](./src/DiagnosticsTools.Core/README.md) – Shared converters, visual helpers, and utility extensions consumed across the tooling stack.
-- [`DiagnosticsTools.PropertyEditing`](./src/DiagnosticsTools.PropertyEditing/README.md) – XAML mutation orchestration, telemetry hooks, and guard helpers used by the property inspector (`net6.0`/`net8.0`).
-- [`DiagnosticsTools.Runtime`](./src/DiagnosticsTools.Runtime/README.md) – Runtime undo/redo coordinator and tree abstractions for hot reload scenarios.
-- [`DiagnosticsTools.Input`](./src/DiagnosticsTools.Input/README.md) – Reusable hot key configuration and behaviours.
-- [`DiagnosticsTools.VirtualizedTreeView`](./src/DiagnosticsTools.VirtualizedTreeView/README.md) – Virtualized tree view control, item container, and supporting helpers.
-- [`DiagnosticsTools.Screenshots`](./src/DiagnosticsTools.Screenshots/README.md) – Screenshot handler interfaces and default file picker implementation.
-- [`DiagnosticsTools.SourceNavigation`](./src/DiagnosticsTools.SourceNavigation/README.md) – Portable PDB + SourceLink resolution with high-level helpers such as `SourceInfoResolver` and `XamlSourceResolver`.
-- [`DiagnosticsTools.XamlAst`](./src/DiagnosticsTools.XamlAst/README.md) – A lightweight XAML workspace that indexes documents, raises change notifications, and surfaces diagnostic information.
-
-### Referencing from your project
+Install the primary DiagnosticsTools package and attach the DevTools window to your application:
 
 ```bash
-dotnet add package DiagnosticsTools.SourceNavigation
-dotnet add package DiagnosticsTools.XamlAst
+dotnet add package DiagnosticsTools
 ```
-
-If you prefer to reference local projects instead (for example when contributing to DiagnosticsTools), add project references to `src/DiagnosticsTools.SourceNavigation/DiagnosticsTools.SourceNavigation.csproj` and `src/DiagnosticsTools.XamlAst/DiagnosticsTools.XamlAst.csproj` in your application.
 
 ```csharp
-using Avalonia.Diagnostics.SourceNavigation;
-using Avalonia.Diagnostics.Xaml;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Diagnostics;
+using Avalonia.Input;
 
-var resolver = new SourceInfoResolver();
-var sourceInfo = await resolver.GetForMemberAsync(typeof(MyControl));
+public partial class App : Application
+{
+    public override void OnFrameworkInitializationCompleted()
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow = new MainWindow();
+            desktop.MainWindow.AttachDevTools(new KeyGesture(Key.F12));
+        }
 
-using var workspace = new XamlAstWorkspace();
-var document = await workspace.GetDocumentAsync("Views/MyControl.axaml");
+        base.OnFrameworkInitializationCompleted();
+    }
+}
 ```
 
-For a full integration example, see the [sample project](./samples/DiagnosticsToolsSample).
+Need deeper customization (property editing, source navigation, runtime undo/redo)?  
+See the [package documentation](#documentation) for guides covering each helper library.
 
-## Usage
+For a complete end-to-end example, explore the [DiagnosticsToolsSample](./samples/DiagnosticsToolsSample) application.
 
-See the [sample project](./samples/DiagnosticsToolsSample) for an example of how to integrate DiagnosticsTools into your Avalonia application.
+## Documentation
 
-## Building
+- [DiagnosticsTools](./docs/packages/DiagnosticsTools.md)
+- [DiagnosticsTools.Core](./docs/packages/DiagnosticsTools.Core.md)
+- [DiagnosticsTools.PropertyEditing](./docs/packages/DiagnosticsTools.PropertyEditing.md)
+- [DiagnosticsTools.Runtime](./docs/packages/DiagnosticsTools.Runtime.md)
+- [DiagnosticsTools.Input](./docs/packages/DiagnosticsTools.Input.md)
+- [DiagnosticsTools.VirtualizedTreeView](./docs/packages/DiagnosticsTools.VirtualizedTreeView.md)
+- [DiagnosticsTools.Screenshots](./docs/packages/DiagnosticsTools.Screenshots.md)
+- [DiagnosticsTools.SourceNavigation](./docs/packages/DiagnosticsTools.SourceNavigation.md)
+- [DiagnosticsTools.XamlAst](./docs/packages/DiagnosticsTools.XamlAst.md)
+
+## Feature Comparison
+
+| Feature | DiagnosticsTools | Avalonia built-in (`Avalonia.Diagnostics`) |
+| --- | --- | --- |
+| Distribution model | Standalone repository with modular NuGet packages (`DiagnosticsTools.*`), SourceLink, and symbol publishing | Integrated into the Avalonia source tree as a single assembly |
+| Source navigation APIs | ✔ `DiagnosticsTools.SourceNavigation` exposes PortablePdbResolver, SourceLinkMap, and SourceNavigator | ✖ No public source navigation helpers |
+| XAML AST workspace | ✔ `DiagnosticsTools.XamlAst` provides workspace, diffing, and folding services | ✖ Visual tree parsing remains internal to the DevTools window |
+| Property editing SDK | ✔ `DiagnosticsTools.PropertyEditing` ships mutation dispatcher, telemetry hooks, and journal APIs | ✖ Property editing infrastructure is scoped to the built-in tooling |
+| Runtime mutation utilities | ✔ `DiagnosticsTools.Runtime` offers undo/redo coordination and tree abstractions | ✖ Runtime mutation helpers are not exposed |
+| Virtualized tree view control | ✔ `DiagnosticsTools.VirtualizedTreeView` publishes the DevTools tree as a reusable control | ✖ Virtualized tree remains bundled within the Avalonia DevTools UI |
+| Documentation | ✔ Comprehensive guides for every package under `docs/packages` | ◑ Primarily inline XML comments within the Avalonia repo |
+| Release automation | ✔ GitHub Actions CI and tag-triggered NuGet release pipeline | ◑ Ships as part of Avalonia’s core build and release process |
+
+## Building & Testing
 
 ```bash
 dotnet build DiagnosticsTools.sln
+dotnet test DiagnosticsTools.sln
 ```
 
-## Testing
-- Run `dotnet test DiagnosticsTools.sln` to execute the full suite.
-- Focused runs can target the matching test projects under `tests/DiagnosticsTools.Core.Tests`, `tests/DiagnosticsTools.Input.Tests`, `tests/DiagnosticsTools.PropertyEditing.Tests`, `tests/DiagnosticsTools.Runtime.Tests`, `tests/DiagnosticsTools.Screenshots.Tests`, or `tests/DiagnosticsTools.SourceNavigation.Tests`.
+Continuous Integration runs on every push and pull request via [GitHub Actions](https://github.com/AvaloniaUI/DiagnosticsTools/actions).
 
-## Attribution
+## Release Management
 
-This project contains code originally authored by the AvaloniaUI team and contributors. We are grateful for their work in creating these powerful diagnostic tools for the Avalonia community.
+Publishing is automated from a tag-based pipeline. Create a tag such as `v1.2.3` and push it to trigger packing and NuGet publication.
 
-- Credit to [BAndysc](https://github.com/BAndysc) for the VirtualizedTreeView work contributed in [AvaloniaUI/Avalonia#14417](https://github.com/AvaloniaUI/Avalonia/pull/14417).
+## Contributing
+
+Issues and pull requests are welcome. Please discuss significant changes via an issue first and ensure that tests pass locally before submitting.
+
+## License & Attribution
+
+DiagnosticsTools is distributed under the [MIT License](./LICENSE.TXT). Portions of the codebase originate from the Avalonia Diagnostics tooling in the [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia) repository.

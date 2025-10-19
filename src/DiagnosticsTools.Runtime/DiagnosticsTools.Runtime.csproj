@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>DiagnosticsTools.Runtime</AssemblyName>
@@ -6,6 +6,7 @@
     <PackageId>DiagnosticsTools.Runtime</PackageId>
     <Description>Runtime mutation coordination helpers extracted from DiagnosticsTools.</Description>
     <PackageTags>avalonia;diagnostics;runtime;undo</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

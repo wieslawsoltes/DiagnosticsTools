@@ -3,6 +3,7 @@
     <Deterministic>true</Deterministic>
     <LangVersion>latest</LangVersion>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -27,6 +28,9 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile Condition="'$(GenerateDocumentationFile)' == ''">true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">11.3.7</VersionPrefix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == '' and '$(GITHUB_ACTIONS)' == 'true'">ci.$(GITHUB_RUN_NUMBER)</VersionSuffix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta.1</VersionSuffix>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(_NormalizedProjectDir)' != '' and $(_NormalizedProjectDir.Contains('/src/DiagnosticsTools.'))">

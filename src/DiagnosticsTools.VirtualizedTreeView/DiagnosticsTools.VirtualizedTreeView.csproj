@@ -6,6 +6,7 @@
     <PackageId>DiagnosticsTools.VirtualizedTreeView</PackageId>
     <Description>Virtualized tree view control extracted from DiagnosticsTools.</Description>
     <PackageTags>avalonia;diagnostics;treeview;virtualized</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

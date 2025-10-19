@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <AssemblyName>DiagnosticsTools.XamlAst</AssemblyName>
     <RootNamespace>Avalonia.Diagnostics.Xaml</RootNamespace>
     <PackageId>DiagnosticsTools.XamlAst</PackageId>
     <Description>Reusable XAML workspace, diagnostics, and indexing utilities extracted from DiagnosticsTools.</Description>
     <PackageTags>avalonia;diagnostics;xaml;workspace</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />

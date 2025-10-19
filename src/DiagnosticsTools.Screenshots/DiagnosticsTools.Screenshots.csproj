@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>DiagnosticsTools.Screenshots</AssemblyName>
@@ -6,6 +6,7 @@
     <PackageId>DiagnosticsTools.Screenshots</PackageId>
     <Description>Screenshot capture helpers extracted from DiagnosticsTools.</Description>
     <PackageTags>avalonia;diagnostics;screenshot</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

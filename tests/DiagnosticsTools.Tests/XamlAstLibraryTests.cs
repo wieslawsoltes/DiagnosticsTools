@@ -79,7 +79,11 @@ namespace DiagnosticsTools.Tests
             }
 
             public event EventHandler<XamlDocumentChangedEventArgs>? DocumentChanged;
-            public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged;
+            public event EventHandler<XamlAstNodesChangedEventArgs>? NodesChanged
+            {
+                add { }
+                remove { }
+            }
 
             public ValueTask<XamlAstDocument> GetDocumentAsync(string path, CancellationToken cancellationToken = default)
             {
