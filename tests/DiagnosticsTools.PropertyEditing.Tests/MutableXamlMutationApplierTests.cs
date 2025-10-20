@@ -39,7 +39,7 @@ public class MutableXamlMutationApplierTests
 
         var result = MutableXamlMutationApplier.TryApply(context.Document, context.Index, context.MutableDocument, operations);
 
-        Assert.Equal(MutableMutationStatus.Applied, result.Status);
+        Assert.True(result.Status == MutableMutationStatus.Applied, result.Failure?.Message ?? "Mutable apply failed.");
         Assert.True(result.Mutated);
         Assert.NotNull(result.Document);
 
@@ -77,7 +77,7 @@ public class MutableXamlMutationApplierTests
 
         var result = MutableXamlMutationApplier.TryApply(context.Document, context.Index, context.MutableDocument, operations);
 
-        Assert.Equal(MutableMutationStatus.Applied, result.Status);
+        Assert.True(result.Status == MutableMutationStatus.Applied, result.Failure?.Message ?? "Mutable apply failed.");
         Assert.True(result.Mutated);
         Assert.NotNull(result.Document);
 
@@ -169,6 +169,75 @@ public class MutableXamlMutationApplierTests
 
         var textElement = Assert.Single(mutable.Elements, e => e.LocalName == "TextBlock");
         Assert.Equal("{StaticResource Accent}", textElement.FindAttribute("Foreground")?.Value);
+    }
+
+    [Fact]
+    public void SetNamespace_And_Attribute_Applies_To_Element()
+    {
+        const string original = "<UserControl xmlns=\"https://github.com/avaloniaui\">" +
+                                "<ContentControl x:Name=\"Host\" />" +
+                                "</UserControl>";
+
+        using var context = CreateDocumentContext(original);
+        var descriptor = Assert.Single(context.Index.Nodes, n => string.Equals(n.LocalName, "ContentControl", StringComparison.Ordinal));
+
+        var namespaceOperation = new ChangeOperation
+        {
+            Id = "op-namespace",
+            Type = ChangeOperationTypes.SetNamespace,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.Value,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                Name = "xmlns:local",
+                NewValue = "clr-namespace:Avalonia.Controls;assembly:Avalonia.Controls"
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = XamlGuardUtilities.ComputeAttributeHash(context.Document, descriptor, "xmlns:local")
+            }
+        };
+
+        var attributeOperation = new ChangeOperation
+        {
+            Id = "op-attribute",
+            Type = ChangeOperationTypes.SetAttribute,
+            Target = new ChangeTarget
+            {
+                DescriptorId = descriptor.Id.Value,
+                NodeType = "Element"
+            },
+            Payload = new ChangePayload
+            {
+                Name = "Content",
+                NewValue = "{local:DemoContent}",
+                ValueKind = "Literal"
+            },
+            Guard = new ChangeOperationGuard
+            {
+                SpanHash = XamlGuardUtilities.ComputeAttributeHash(context.Document, descriptor, "Content")
+            }
+        };
+
+        var operations = new[] { namespaceOperation, attributeOperation };
+        var result = MutableXamlMutationApplier.TryApply(context.Document, context.Index, context.MutableDocument, operations);
+
+        Assert.True(result.Status == MutableMutationStatus.Applied, result.Failure?.Message ?? "Mutable apply failed.");
+        Assert.True(result.Mutated);
+        Assert.NotNull(result.Document);
+
+        var serialized = MutableXamlSerializer.Serialize(result.Document!);
+        var element = Assert.Single(result.Document!.Elements, e => string.Equals(e.LocalName, "ContentControl", StringComparison.Ordinal));
+        var namespaceAttribute = element.FindAttribute("local", "xmlns");
+
+        Assert.NotNull(namespaceAttribute);
+        Assert.Equal("clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls", namespaceAttribute!.Value);
+        Assert.NotNull(element.FindAttribute("Content"));
+        Assert.Contains("xmlns:local=\"clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls\"", serialized, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{local:DemoContent}\"", serialized, StringComparison.Ordinal);
     }
 
     private static XamlAstNodeDescriptor GetRootDescriptor(IXamlAstIndex index)

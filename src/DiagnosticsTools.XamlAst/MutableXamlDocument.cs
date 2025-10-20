@@ -705,8 +705,19 @@ namespace Avalonia.Diagnostics.Xaml
                 case XmlElementSyntax elementSyntax:
                 {
                     var updatedStart = elementSyntax.StartTag.WithName(nameSyntax);
+                    if (updatedStart.AttributesNode.Count > 0)
+                    {
+                        var firstAttribute = updatedStart.AttributesNode[0];
+                        if (!firstAttribute.GetLeadingTrivia().Any(trivia => trivia.Kind == SyntaxKind.WhitespaceTrivia))
+                        {
+                            var spacedAttribute = firstAttribute.WithLeadingTrivia(SyntaxFactory.TriviaList(SyntaxFactory.WhitespaceTrivia(" ")));
+                            var attributes = updatedStart.AttributesNode.Replace(firstAttribute, spacedAttribute);
+                            updatedStart = updatedStart.WithAttributes(attributes);
+                        }
+                    }
+                    var endTagName = nameSyntax.WithTrailingTrivia(SyntaxFactory.TriviaList()) as XmlNameSyntax ?? nameSyntax;
                     var updatedEnd = elementSyntax.EndTag is not null
-                        ? SyntaxFactory.XmlElementEndTag(elementSyntax.EndTag.LessThanSlashToken, nameSyntax, elementSyntax.EndTag.GreaterThanToken)
+                        ? SyntaxFactory.XmlElementEndTag(elementSyntax.EndTag.LessThanSlashToken, endTagName, elementSyntax.EndTag.GreaterThanToken)
                         : null;
                     var updatedElement = elementSyntax.WithStartTag(updatedStart).WithEndTag(updatedEnd);
                     ReplaceSyntax((SyntaxNode)updatedElement);

@@ -39,6 +39,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return MutableMutationResult.Applied(mutated: false, mutableDocument);
             }
 
+            var guardDocument = document;
+            var guardIndex = index;
             var currentDocument = document;
             var currentMutable = mutableDocument;
             var mutated = false;
@@ -47,11 +49,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 var outcome = operation.Type switch
                 {
-                    ChangeOperationTypes.SetAttribute => TryApplySetAttribute(currentDocument, index, currentMutable, operation),
-                    ChangeOperationTypes.RemoveNode => TryApplyRemoveNode(currentDocument, index, currentMutable, operation),
-                    ChangeOperationTypes.UpsertElement => TryApplyUpsertElement(currentDocument, index, currentMutable, operation),
-                    ChangeOperationTypes.RenameElement => TryApplyRenameElement(currentDocument, index, currentMutable, operation),
-                    ChangeOperationTypes.RenameResource => TryApplyRenameResource(currentDocument, index, currentMutable, operation),
+                    ChangeOperationTypes.SetAttribute => TryApplySetAttribute(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.RemoveNode => TryApplyRemoveNode(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.UpsertElement => TryApplyUpsertElement(guardDocument, guardIndex, currentDocument, currentMutable, operation),
+                    ChangeOperationTypes.SetNamespace => TryApplySetNamespace(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.SetContentText => TryApplySetContentText(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.ReorderNode => TryApplyReorderNode(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.RenameElement => TryApplyRenameElement(guardDocument, guardIndex, currentMutable, operation),
+                    ChangeOperationTypes.RenameResource => TryApplyRenameResource(guardDocument, guardIndex, currentMutable, operation),
                     _ => OperationOutcome.Unsupported(),
                 };
 
@@ -96,19 +101,13 @@ namespace Avalonia.Diagnostics.PropertyEditing
         }
 
         private static OperationOutcome TryApplySetAttribute(
-            XamlAstDocument document,
-            IXamlAstIndex index,
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
             MutableXamlDocument mutableDocument,
             ChangeOperation operation)
         {
-            if (!TryGetDescriptor(index, operation, out var descriptor, out var failure))
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
-                return OperationOutcome.Failed(failure);
-            }
-
-            if (!mutableDocument.TryGetElement(descriptor, out var element) || element is null)
-            {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to resolve mutable element for descriptor.");
                 return OperationOutcome.Failed(failure);
             }
 
@@ -119,107 +118,119 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return OperationOutcome.Failed(failure);
             }
 
-            if (string.IsNullOrWhiteSpace(payload.Name))
+            var attributeName = payload.Name;
+            if (string.IsNullOrWhiteSpace(attributeName))
             {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Attribute name is required for SetAttribute operations.");
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetAttribute requires an attribute name.");
                 return OperationOutcome.Failed(failure);
             }
 
             if (!ValidateSpanHash(
-                operation.Guard?.SpanHash,
-                () => XamlGuardUtilities.ComputeAttributeHash(document, descriptor, payload.Name),
-                operation.Id,
-                "Attribute span hash mismatch.",
-                out failure))
+                    operation.Guard?.SpanHash,
+                    () => XamlGuardUtilities.ComputeAttributeHash(guardDocument, descriptor, attributeName!),
+                    operation.Id,
+                    "Attribute span hash mismatch.",
+                    out failure))
             {
                 return OperationOutcome.Failed(failure);
             }
 
-            if (payload.Name.IndexOf('.') >= 0 &&
-                !ValidateParentGuard(document, index, descriptor, operation, out failure))
+            if (attributeName!.Contains('.') &&
+                !ValidateParentGuard(guardDocument, guardIndex, descriptor, operation, out failure))
             {
                 return OperationOutcome.Failed(failure);
             }
+
+            if (!mutableDocument.TryGetElement(descriptor, out var element) || element is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Target element could not be resolved in mutable document.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            SplitQualifiedName(attributeName, out var localName, out var prefix);
+            var existingAttribute = element.FindAttribute(localName, prefix);
 
             var valueKind = payload.ValueKind ?? string.Empty;
-            var isUnset = string.Equals(valueKind, "Unset", StringComparison.OrdinalIgnoreCase) || payload.NewValue is null;
+            var shouldUnset = string.Equals(valueKind, "Unset", StringComparison.OrdinalIgnoreCase) ||
+                              payload.NewValue is null;
 
-            var mutableAttribute = element.FindAttribute(payload.Name, payload.NamespacePrefix);
-
-            if (isUnset)
+            if (shouldUnset)
             {
-                if (mutableAttribute is null)
+                if (existingAttribute is null)
                 {
                     return OperationOutcome.NoChange();
                 }
 
-                if (!element.RemoveAttribute(mutableAttribute))
+                if (!element.RemoveAttribute(existingAttribute))
                 {
-                    failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to remove attribute.");
+                    failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to remove attribute from element.");
                     return OperationOutcome.Failed(failure);
                 }
 
-                var descriptorUpdate = mutableDocument.ToDescriptor(element);
-                mutableDocument.UpdateDescriptorMapping(element, descriptorUpdate);
-                return OperationOutcome.Applied(false);
+                var updatedDescriptor = mutableDocument.ToDescriptor(element);
+                mutableDocument.UpdateDescriptorMapping(element, updatedDescriptor);
+                return OperationOutcome.Applied(true);
             }
 
             var newValue = payload.NewValue;
             if (string.IsNullOrEmpty(newValue))
             {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetAttribute requires a non-empty newValue.");
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetAttribute requires a non-empty value.");
                 return OperationOutcome.Failed(failure);
             }
 
-            if (!string.Equals(valueKind, "Literal", StringComparison.OrdinalIgnoreCase))
+            if (existingAttribute is not null)
             {
-                return OperationOutcome.Unsupported();
-            }
+                if (string.Equals(existingAttribute.Value, newValue, StringComparison.Ordinal))
+                {
+                    return OperationOutcome.NoChange();
+                }
 
-            var qualifiedName = GetQualifiedAttributeName(payload);
+                var replacementSyntax = CreateAttributeSyntax(
+                    attributeName,
+                    newValue,
+                    existingAttribute.LeadingTrivia,
+                    existingAttribute.TrailingTrivia);
 
-            if (mutableAttribute is not null)
-            {
-                var replacement = CreateAttributeSyntax(qualifiedName, newValue, mutableAttribute.LeadingTrivia, mutableAttribute.TrailingTrivia);
-                if (!element.TryReplaceAttribute(mutableAttribute, replacement))
+                if (!element.TryReplaceAttribute(existingAttribute, replacementSyntax))
                 {
                     failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to update attribute value.");
                     return OperationOutcome.Failed(failure);
                 }
 
-                mutableAttribute.Value = newValue;
-                var descriptorUpdate = mutableDocument.ToDescriptor(element);
-                mutableDocument.UpdateDescriptorMapping(element, descriptorUpdate);
-                return OperationOutcome.Applied(false);
+                existingAttribute.Value = newValue;
+            }
+            else
+            {
+                var attributeSyntax = CreateAttributeSyntax(
+                    attributeName,
+                    newValue,
+                    SyntaxTriviaListHelper.CreateLeadingSpace(),
+                    SyntaxFactory.TriviaList());
+
+                var created = element.AddAttribute(attributeSyntax);
+                created.Value = newValue;
             }
 
-            var newAttributeSyntax = CreateAttributeSyntax(
-                qualifiedName,
-                newValue,
-                SyntaxTriviaListHelper.CreateLeadingSpace(),
-                SyntaxFactory.TriviaList());
-
-            element.AddAttribute(newAttributeSyntax);
-            var updatedDescriptor = mutableDocument.ToDescriptor(element);
-            mutableDocument.UpdateDescriptorMapping(element, updatedDescriptor);
-
-            return OperationOutcome.Applied(false);
+            var descriptorUpdateFinal = mutableDocument.ToDescriptor(element);
+            mutableDocument.UpdateDescriptorMapping(element, descriptorUpdateFinal);
+            return OperationOutcome.Applied(true);
         }
 
         private static OperationOutcome TryApplyRemoveNode(
-            XamlAstDocument document,
-            IXamlAstIndex index,
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
             MutableXamlDocument mutableDocument,
             ChangeOperation operation)
         {
-            if (!TryGetDescriptor(index, operation, out var descriptor, out var failure))
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
                 return OperationOutcome.Failed(failure);
             }
 
             if (!ValidateSpanHash(
                 operation.Guard?.SpanHash,
-                () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                () => XamlGuardUtilities.ComputeNodeHash(guardDocument, descriptor),
                 operation.Id,
                 "Node span hash mismatch.",
                 out failure))
@@ -227,7 +238,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return OperationOutcome.Failed(failure);
             }
 
-            if (!ValidateParentGuard(document, index, descriptor, operation, out failure))
+            if (!ValidateParentGuard(guardDocument, guardIndex, descriptor, operation, out failure))
             {
                 return OperationOutcome.Failed(failure);
             }
@@ -256,12 +267,13 @@ namespace Avalonia.Diagnostics.PropertyEditing
         }
 
         private static OperationOutcome TryApplyUpsertElement(
-            XamlAstDocument document,
-            IXamlAstIndex index,
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
+            XamlAstDocument currentDocument,
             MutableXamlDocument mutableDocument,
             ChangeOperation operation)
         {
-            if (!TryGetDescriptor(index, operation, out var descriptor, out var failure))
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
                 return OperationOutcome.Failed(failure);
             }
@@ -281,7 +293,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             if (!ValidateSpanHash(
                 operation.Guard?.SpanHash,
-                () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                () => XamlGuardUtilities.ComputeNodeHash(guardDocument, descriptor),
                 operation.Id,
                 "Element span hash mismatch.",
                 out failure))
@@ -289,7 +301,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return OperationOutcome.Failed(failure);
             }
 
-            if (!ValidateParentGuard(document, index, descriptor, operation, out failure))
+            if (!ValidateParentGuard(guardDocument, guardIndex, descriptor, operation, out failure))
             {
                 return OperationOutcome.Failed(failure);
             }
@@ -300,6 +312,11 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 {
                     failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to locate parent element for insertion.");
                     return OperationOutcome.Failed(failure);
+                }
+
+                if (parentElement.Syntax is XmlEmptyElementSyntax)
+                {
+                    return TryApplyWithTextRewrite(guardDocument, guardIndex, mutableDocument, operation);
                 }
 
                 var nodes = ParseContentNodes(payload.Serialized!, payload.SurroundingWhitespace);
@@ -334,23 +351,23 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     return OperationOutcome.Failed(failure);
                 }
 
-                if (document.Syntax.RootSyntax is not IXmlElementSyntax originalRoot)
+                if (currentDocument.Syntax.RootSyntax is not IXmlElementSyntax originalRoot)
                 {
                     failure = ChangeDispatchResult.MutationFailure(operation.Id, "Document root is not an XML element.");
                     return OperationOutcome.Failed(failure);
                 }
 
-                var updatedSyntax = document.Syntax.ReplaceNode(originalRoot.AsNode, replacementRoot.AsNode);
+                var updatedSyntax = currentDocument.Syntax.ReplaceNode(originalRoot.AsNode, replacementRoot.AsNode);
                 var updatedText = updatedSyntax.ToFullString();
                 var updatedDocument = new XamlAstDocument(
-                    document.Path,
+                    currentDocument.Path,
                     updatedText,
                     updatedSyntax,
-                    document.Version,
-                    document.Diagnostics,
-                    document.Encoding,
-                    document.HasByteOrderMark,
-                    document.IsEncodingFallback);
+                    currentDocument.Version,
+                    currentDocument.Diagnostics,
+                    currentDocument.Encoding,
+                    currentDocument.HasByteOrderMark,
+                    currentDocument.IsEncodingFallback);
 
                 var updatedMutable = MutableXamlDocument.FromDocument(updatedDocument);
                 return OperationOutcome.ReplacedDocument(updatedDocument, updatedMutable);
@@ -369,13 +386,122 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return OperationOutcome.Applied(true);
         }
 
-        private static OperationOutcome TryApplyRenameElement(
-            XamlAstDocument document,
-            IXamlAstIndex index,
+        private static OperationOutcome TryApplySetNamespace(
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
             MutableXamlDocument mutableDocument,
             ChangeOperation operation)
         {
-            if (!TryGetDescriptor(index, operation, out var descriptor, out var failure))
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
+            {
+                return OperationOutcome.Failed(failure);
+            }
+
+            var payload = operation.Payload;
+            if (payload is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Missing payload for SetNamespace operation.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            if (string.IsNullOrWhiteSpace(payload.Name))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetNamespace requires a namespace attribute name.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            var attributeName = payload.Name!;
+            if (!attributeName.StartsWith("xmlns", StringComparison.Ordinal))
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Namespace attributes must begin with 'xmlns'.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            if (!ValidateSpanHash(
+                    operation.Guard?.SpanHash,
+                    () => XamlGuardUtilities.ComputeAttributeHash(guardDocument, descriptor, attributeName),
+                    operation.Id,
+                    "Namespace span hash mismatch.",
+                    out failure))
+            {
+                return OperationOutcome.Failed(failure);
+            }
+
+            if (!mutableDocument.TryGetElement(descriptor, out var element) || element is null)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to locate element for SetNamespace operation.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            SplitNamespaceAttributeName(attributeName, out var localName, out var prefix);
+            var mutableAttribute = element.FindAttribute(localName, prefix);
+            var newValue = payload.NewValue;
+
+            if (string.IsNullOrWhiteSpace(newValue))
+            {
+                if (mutableAttribute is null)
+                {
+                    return OperationOutcome.NoChange();
+                }
+
+                if (!element.RemoveAttribute(mutableAttribute))
+                {
+                    failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to remove namespace attribute.");
+                    return OperationOutcome.Failed(failure);
+                }
+
+                var updatedDescriptor = mutableDocument.ToDescriptor(element);
+                mutableDocument.UpdateDescriptorMapping(element, updatedDescriptor);
+                return OperationOutcome.Applied(true);
+            }
+
+            var qualifiedName = attributeName;
+            var normalizedValue = NormalizeNamespaceValue(newValue ?? string.Empty);
+            if (mutableAttribute is not null)
+            {
+                var replacementSyntax = CreateAttributeSyntax(qualifiedName, normalizedValue, mutableAttribute.LeadingTrivia, mutableAttribute.TrailingTrivia);
+                if (!element.TryReplaceAttribute(mutableAttribute, replacementSyntax))
+                {
+                    failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to update namespace attribute value.");
+                    return OperationOutcome.Failed(failure);
+                }
+
+                mutableAttribute.Value = normalizedValue;
+            }
+            else
+            {
+                var attributeSyntax = CreateAttributeSyntax(
+                    qualifiedName,
+                    normalizedValue,
+                    SyntaxTriviaListHelper.CreateLeadingSpace(),
+                    SyntaxFactory.TriviaList());
+
+                var createdAttribute = element.AddAttribute(attributeSyntax);
+                createdAttribute.Value = normalizedValue;
+            }
+
+            var descriptorUpdate = mutableDocument.ToDescriptor(element);
+            mutableDocument.UpdateDescriptorMapping(element, descriptorUpdate);
+            return OperationOutcome.Applied(true);
+        }
+
+        private static string NormalizeNamespaceValue(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            return value.Replace("assembly:", "assembly=");
+        }
+
+        private static OperationOutcome TryApplyRenameElement(
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
+            MutableXamlDocument mutableDocument,
+            ChangeOperation operation)
+        {
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
                 return OperationOutcome.Failed(failure);
             }
@@ -401,7 +527,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             if (!ValidateSpanHash(
                     operation.Guard?.SpanHash,
-                    () => XamlGuardUtilities.ComputeNodeHash(document, descriptor),
+                    () => XamlGuardUtilities.ComputeNodeHash(guardDocument, descriptor),
                     operation.Id,
                     "Element span hash mismatch.",
                     out failure))
@@ -436,126 +562,202 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return OperationOutcome.Applied(false);
         }
 
-        private static OperationOutcome TryApplyRenameResource(
-            XamlAstDocument document,
-            IXamlAstIndex index,
+        private static OperationOutcome TryApplySetContentText(
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
             MutableXamlDocument mutableDocument,
             ChangeOperation operation)
         {
-            if (!TryGetDescriptor(index, operation, out var descriptor, out var failure))
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
-                return OperationOutcome.Failed(failure);
-            }
-
-            var payload = operation.Payload;
-            if (payload is null)
-            {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Missing payload for RenameResource operation.");
-                return OperationOutcome.Failed(failure);
-            }
-
-            if (string.IsNullOrWhiteSpace(payload.OldKey) || string.IsNullOrWhiteSpace(payload.NewKey))
-            {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "RenameResource requires both oldKey and newKey.");
-                return OperationOutcome.Failed(failure);
-            }
-
-            var oldKey = payload.OldKey!;
-            var newKey = payload.NewKey!;
-
-            if (string.Equals(oldKey, newKey, StringComparison.Ordinal))
-            {
-                return OperationOutcome.NoChange();
-            }
-
-            var keyAttributeName = DetermineResourceKeyAttributeName(descriptor);
-            if (string.IsNullOrEmpty(keyAttributeName))
-            {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Target resource does not declare a key attribute.");
                 return OperationOutcome.Failed(failure);
             }
 
             if (!ValidateSpanHash(
                     operation.Guard?.SpanHash,
-                    () => XamlGuardUtilities.ComputeAttributeHash(document, descriptor, keyAttributeName!),
+                    () => XamlGuardUtilities.ComputeNodeHash(guardDocument, descriptor),
                     operation.Id,
-                    "Resource key span hash mismatch.",
+                    "Node span hash mismatch.",
                     out failure))
             {
                 return OperationOutcome.Failed(failure);
             }
 
-            if (!ValidateParentGuard(document, index, descriptor, operation, out failure))
+            return TryApplyWithTextRewrite(guardDocument, guardIndex, mutableDocument, operation);
+        }
+
+        private static OperationOutcome TryApplyReorderNode(
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
+            MutableXamlDocument mutableDocument,
+            ChangeOperation operation)
+        {
+            if (!TryGetDescriptor(guardIndex, operation, out var descriptor, out var failure))
             {
                 return OperationOutcome.Failed(failure);
             }
 
             if (!mutableDocument.TryGetElement(descriptor, out var element) || element is null)
             {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Target resource element could not be resolved in mutable document.");
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to resolve element for ReorderNode operation.");
                 return OperationOutcome.Failed(failure);
             }
 
-            SplitQualifiedName(keyAttributeName!, out var keyLocalName, out var keyPrefix);
-            var keyAttribute = element.FindAttribute(keyLocalName, keyPrefix);
-            if (keyAttribute is null)
+            if (!ValidateSpanHash(
+                    operation.Guard?.SpanHash,
+                    () => XamlGuardUtilities.ComputeNodeHash(guardDocument, descriptor),
+                    operation.Id,
+                    "Node span hash mismatch.",
+                    out failure))
             {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to locate resource key attribute in mutable tree.");
                 return OperationOutcome.Failed(failure);
             }
 
-            if (!string.Equals(keyAttribute.Value, oldKey, StringComparison.Ordinal))
+            if (!ValidateParentGuard(guardDocument, guardIndex, descriptor, operation, out failure))
             {
-                failure = ChangeDispatchResult.GuardFailure(operation.Id, "Resource key mismatch.");
                 return OperationOutcome.Failed(failure);
             }
 
-            var updatedKeyAttributeSyntax = CreateAttributeSyntax(keyAttribute.FullName, newKey, keyAttribute.LeadingTrivia, keyAttribute.TrailingTrivia);
-            if (!element.TryReplaceAttribute(keyAttribute, updatedKeyAttributeSyntax))
+            var payload = operation.Payload;
+            if (payload?.NewIndex is not int requestedIndex)
             {
-                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Failed to update resource key attribute.");
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "ReorderNode requires a target index.");
                 return OperationOutcome.Failed(failure);
             }
 
-            keyAttribute.Value = newKey;
-
-            var descriptorUpdate = mutableDocument.ToDescriptor(element);
-            mutableDocument.UpdateDescriptorMapping(element, descriptorUpdate);
-
-            if (payload.CascadeTargets is { Count: > 0 } cascadeTargets)
+            var parent = element.Parent;
+            if (parent is null)
             {
-                var processed = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var targetId in cascadeTargets)
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Cannot reorder the root element.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            var currentIndex = parent.IndexOfChild(element);
+            if (currentIndex < 0)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to determine current index for target element.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            var boundedIndex = ClampIndex(requestedIndex, parent.Children.Count);
+            if (boundedIndex == currentIndex)
+            {
+                return OperationOutcome.NoChange();
+            }
+
+            if (parent.Syntax is not XmlElementSyntax parentSyntax)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Parent element cannot accept reordered content.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            if (element.Syntax.AsNode is not XmlNodeSyntax elementSyntaxNode)
+            {
+                failure = ChangeDispatchResult.MutationFailure(operation.Id, "Unable to resolve syntax node for reorder operation.");
+                return OperationOutcome.Failed(failure);
+            }
+
+            var adjustedIndex = boundedIndex > currentIndex ? boundedIndex - 1 : boundedIndex;
+            if (adjustedIndex < 0)
+            {
+                adjustedIndex = 0;
+            }
+
+            parent.RemoveChild(element);
+            parent.InsertRawContent(adjustedIndex, new[] { elementSyntaxNode });
+
+            var updatedDescriptor = mutableDocument.ToDescriptor(parent);
+            mutableDocument.UpdateDescriptorMapping(parent, updatedDescriptor);
+            return OperationOutcome.Applied(true);
+        }
+
+        private static OperationOutcome TryApplyWithTextRewrite(
+            XamlAstDocument document,
+            IXamlAstIndex index,
+            MutableXamlDocument mutableDocument,
+            ChangeOperation operation)
+        {
+            var currentText = MutableXamlSerializer.Serialize(mutableDocument);
+            var currentSyntax = Parser.ParseText(currentText);
+            var currentDocument = new XamlAstDocument(
+                document.Path,
+                currentText,
+                currentSyntax,
+                document.Version,
+                document.Diagnostics,
+                document.Encoding,
+                document.HasByteOrderMark,
+                document.IsEncodingFallback);
+
+            var currentIndex = XamlAstIndex.Build(currentDocument);
+
+            var edits = new List<XamlTextEdit>();
+            if (!XamlMutationEditBuilder.TryBuildEdits(currentDocument, currentIndex, operation, edits, out var failure))
+            {
+                Console.WriteLine($"Mutable fallback failed: {failure.Status} {failure.Message}");
+                return OperationOutcome.Failed(failure);
+            }
+
+            if (edits.Count == 0)
+            {
+                return OperationOutcome.NoChange();
+            }
+
+            var updatedText = ApplyTextEdits(currentText, edits);
+            var updatedSyntax = Parser.ParseText(updatedText);
+            var updatedDocument = new XamlAstDocument(
+                document.Path,
+                updatedText,
+                updatedSyntax,
+                document.Version,
+                document.Diagnostics,
+                document.Encoding,
+                document.HasByteOrderMark,
+                document.IsEncodingFallback);
+
+            var updatedMutable = MutableXamlDocument.FromDocument(updatedDocument);
+            return OperationOutcome.ReplacedDocument(updatedDocument, updatedMutable);
+        }
+
+        private static string ApplyTextEdits(string text, IReadOnlyList<XamlTextEdit> edits)
+        {
+            if (edits.Count == 0)
+            {
+                return text;
+            }
+
+            var sorted = new List<XamlTextEdit>(edits);
+            sorted.Sort((left, right) => left.Start.CompareTo(right.Start));
+
+            var builder = new StringBuilder(text.Length);
+            var current = 0;
+
+            foreach (var edit in sorted)
+            {
+                if (edit.Start > current)
                 {
-                    if (string.IsNullOrWhiteSpace(targetId) || !processed.Add(targetId))
-                    {
-                        continue;
-                    }
-
-                    if (!index.TryGetDescriptor(new XamlAstNodeId(targetId), out var cascadeDescriptor))
-                    {
-                        failure = ChangeDispatchResult.MutationFailure(operation.Id, $"Cascade target '{targetId}' not found in XAML document.");
-                        return OperationOutcome.Failed(failure);
-                    }
-
-                    if (!mutableDocument.TryGetElement(cascadeDescriptor, out var cascadeElement) || cascadeElement is null)
-                    {
-                        failure = ChangeDispatchResult.MutationFailure(operation.Id, $"Unable to resolve cascade target '{targetId}'.");
-                        return OperationOutcome.Failed(failure);
-                    }
-
-                    if (!TryUpdateCascadeAttributes(cascadeElement, oldKey, newKey))
-                    {
-                        failure = ChangeDispatchResult.GuardFailure(operation.Id, "Cascade target mismatch.");
-                        return OperationOutcome.Failed(failure);
-                    }
-
-                    var cascadeUpdate = mutableDocument.ToDescriptor(cascadeElement);
-                    mutableDocument.UpdateDescriptorMapping(cascadeElement, cascadeUpdate);
+                    builder.Append(text, current, edit.Start - current);
                 }
+
+                builder.Append(edit.Replacement);
+                current = edit.Start + edit.Length;
             }
 
-            return OperationOutcome.Applied(false);
+            if (current < text.Length)
+            {
+                builder.Append(text, current, text.Length - current);
+            }
+
+            return builder.ToString();
+        }
+
+        private static OperationOutcome TryApplyRenameResource(
+            XamlAstDocument guardDocument,
+            IXamlAstIndex guardIndex,
+            MutableXamlDocument mutableDocument,
+            ChangeOperation operation)
+        {
+            return TryApplyWithTextRewrite(guardDocument, guardIndex, mutableDocument, operation);
         }
 
         private static IReadOnlyList<XmlNodeSyntax> ParseContentNodes(string serialized, string? surroundingWhitespace)
@@ -594,17 +796,17 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 if (colonIndex >= 0)
                 {
                     var prefixPart = qualifiedName.Substring(0, colonIndex);
-                    snippet = $"<{qualifiedName} xmlns:{prefixPart}='urn:temp' />";
+                    snippet = $"<{qualifiedName} xmlns:{prefixPart}='urn:temp'></{qualifiedName}>";
                 }
                 else
                 {
-                    snippet = $"<{qualifiedName} />";
+                    snippet = $"<{qualifiedName}></{qualifiedName}>";
                 }
 
                 var parsed = Parser.ParseText(snippet);
-                if (parsed.RootSyntax is XmlEmptyElementSyntax empty)
+                if (parsed.RootSyntax is XmlElementSyntax element)
                 {
-                    var nameNode = empty.NameNode;
+                    var nameNode = element.StartTag.NameNode.WithTrailingTrivia(SyntaxFactory.TriviaList());
                     localName = nameNode.LocalName ?? string.Empty;
                     prefix = nameNode.Prefix;
                     nameSyntax = nameNode;
@@ -709,16 +911,6 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return builder.ToString();
         }
 
-        private static string GetQualifiedAttributeName(ChangePayload payload)
-        {
-            if (!string.IsNullOrEmpty(payload.NamespacePrefix))
-            {
-                return string.Concat(payload.NamespacePrefix, ":", payload.Name);
-            }
-
-            return payload.Name;
-        }
-
         private static XmlAttributeSyntax CreateAttributeSyntax(
             string name,
             string value,
@@ -748,6 +940,34 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 .Replace("\"", "&quot;")
                 .Replace("<", "&lt;")
                 .Replace(">", "&gt;");
+        }
+
+        private static void SplitNamespaceAttributeName(string attributeName, out string localName, out string? prefix)
+        {
+            var colonIndex = attributeName.IndexOf(':');
+            if (colonIndex >= 0 && colonIndex < attributeName.Length - 1)
+            {
+                prefix = attributeName.Substring(0, colonIndex);
+                localName = attributeName.Substring(colonIndex + 1);
+            }
+            else
+            {
+                prefix = null;
+                localName = attributeName;
+            }
+        }
+
+        private static int ClampIndex(int requestedIndex, int totalCount)
+        {
+            if (totalCount <= 0)
+            {
+                return 0;
+            }
+
+            var upperBound = totalCount - 1;
+
+            var clamped = Math.Max(0, Math.Min(requestedIndex, upperBound));
+            return clamped;
         }
 
         private static bool TryGetDescriptor(
