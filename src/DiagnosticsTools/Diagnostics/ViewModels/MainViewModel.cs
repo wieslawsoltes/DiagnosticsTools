@@ -70,6 +70,7 @@ namespace Avalonia.Diagnostics.ViewModels
         private bool _showTreeStats;
         private int _treeTotalNodeCount;
         private int _treeExpandedNodeCount;
+        private bool _useAstMutationPipeline;
 
         internal XamlAstWorkspace XamlAstWorkspace => _xamlAstWorkspace;
 
@@ -88,6 +89,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _propertyChangeEmitter.ExternalDocumentChanged += OnExternalDocumentChanged;
             _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
+            _useAstMutationPipeline = true;
             if (_roslynWorkspace is not null)
             {
                 _workspaceChangedHandler = OnRoslynWorkspaceChanged;
@@ -168,6 +170,15 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public bool CanRedoMutation => _mutationDispatcher.CanRedo;
 
+        public bool UseAstMutationPipeline
+        {
+            get => _useAstMutationPipeline;
+            set
+            {
+                RaiseAndSetIfChanged(ref _useAstMutationPipeline, value);
+            }
+        }
+
         public bool FreezePopups
         {
             get => _freezePopups;
@@ -182,6 +193,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
         public void ToggleVisualizeMarginPadding()
             => ShouldVisualizeMarginPadding = !ShouldVisualizeMarginPadding;
+
 
         private IRenderer? TryGetRenderer()
             => _root switch

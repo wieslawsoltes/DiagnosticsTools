@@ -2255,7 +2255,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 try
                 {
                     var index = await _xamlAstWorkspace.GetIndexAsync(candidate).ConfigureAwait(false);
-                    var descriptor = ResolveDescriptor(index, node, null);
+                    var descriptor = await ResolveDescriptorAsync(candidate, node, null, index).ConfigureAwait(false);
                     if (descriptor is null)
                     {
                         continue;
@@ -2486,8 +2486,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             try
             {
-                var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
-                var descriptor = ResolveDescriptor(index, node, info);
+                var descriptor = await ResolveDescriptorAsync(path!, node, info).ConfigureAwait(false);
                 if (descriptor is null)
                 {
                     return;
@@ -2500,6 +2499,91 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 // Descriptor resolution is best-effort.
             }
+        }
+
+        private async Task RefreshDocumentDescriptorsAsync(string path)
+        {
+            var normalizedPath = NormalizeLocalPath(path) ?? path;
+
+            List<TreeNode> nodesToRefresh;
+            lock (_nodesByXamlId)
+            {
+                var set = new HashSet<TreeNode>();
+                foreach (var kvp in _descriptorDocuments)
+                {
+                    if (kvp.Value is null || !PathsEqual(kvp.Value, normalizedPath))
+                    {
+                        continue;
+                    }
+
+                    if (_nodesByXamlId.TryGetValue(kvp.Key, out var node) && node is not null)
+                    {
+                        set.Add(node);
+                    }
+                }
+
+                nodesToRefresh = set.Count > 0 ? set.ToList() : new List<TreeNode>();
+            }
+
+            if (nodesToRefresh.Count == 0)
+            {
+                return;
+            }
+
+            XamlAstDocument document;
+            IXamlAstIndex index;
+            MutableXamlDocument mutable;
+            try
+            {
+                document = await _xamlAstWorkspace.GetDocumentAsync(path).ConfigureAwait(false);
+                index = await _xamlAstWorkspace.GetIndexAsync(path).ConfigureAwait(false);
+                mutable = await _xamlAstWorkspace.GetMutableDocumentAsync(path).ConfigureAwait(false);
+            }
+            catch
+            {
+                return;
+            }
+
+            var descriptors = index.Nodes as IReadOnlyList<XamlAstNodeDescriptor> ?? index.Nodes.ToList();
+
+            var refreshTasks = new List<Task>(nodesToRefresh.Count);
+            foreach (var node in nodesToRefresh)
+            {
+                refreshTasks.Add(UpdateDescriptorForNodeAsync(node, path, document, descriptors, index, mutable));
+            }
+
+            await Task.WhenAll(refreshTasks).ConfigureAwait(false);
+        }
+
+        private async Task UpdateDescriptorForNodeAsync(
+            TreeNode node,
+            string path,
+            XamlAstDocument document,
+            IReadOnlyList<XamlAstNodeDescriptor> descriptors,
+            IXamlAstIndex index,
+            MutableXamlDocument mutable)
+        {
+            XamlAstNodeDescriptor? descriptor = null;
+            try
+            {
+                descriptor = await ResolveDescriptorAsync(path, node, node.SourceInfo, index, mutable).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Resolution best-effort.
+            }
+
+            var selection = descriptor is not null ? new XamlAstSelection(document, descriptor, descriptors) : null;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                RegisterXamlDescriptor(node, descriptor, path);
+
+                if (ReferenceEquals(node, SelectedNode) && selection is not null)
+                {
+                    SelectedNodeXaml = selection;
+                }
+            }, DispatcherPriority.Background);
         }
 
         private void RegisterXamlDescriptor(TreeNode node, XamlAstNodeDescriptor? descriptor, string? documentPath = null)
@@ -2558,7 +2642,7 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 var document = await _xamlAstWorkspace.GetDocumentAsync(path!).ConfigureAwait(false);
                 var index = await _xamlAstWorkspace.GetIndexAsync(path!).ConfigureAwait(false);
-                var descriptor = ResolveDescriptor(index, node, info);
+                var descriptor = await ResolveDescriptorAsync(path!, node, info, index).ConfigureAwait(false);
                 if (descriptor is null)
                 {
                     var documentPath = document.Path ?? info?.LocalPath ?? "<unknown>";
@@ -2588,6 +2672,55 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return Math.Max(end, start);
+        }
+
+        private async Task<XamlAstNodeDescriptor?> ResolveDescriptorAsync(
+            string path,
+            TreeNode node,
+            SourceInfo? info,
+            IXamlAstIndex? index = null,
+            MutableXamlDocument? mutableDocument = null)
+        {
+            var runtimeDescriptor = await TryResolveDescriptorByRuntimeAsync(path, node, mutableDocument).ConfigureAwait(false);
+            if (runtimeDescriptor is not null)
+            {
+                return runtimeDescriptor;
+            }
+
+            var effectiveIndex = index ?? await _xamlAstWorkspace.GetIndexAsync(path).ConfigureAwait(false);
+            return ResolveDescriptor(effectiveIndex, node, info);
+        }
+
+        private async Task<XamlAstNodeDescriptor?> TryResolveDescriptorByRuntimeAsync(string path, TreeNode node, MutableXamlDocument? mutableDocument = null)
+        {
+            var runtimeId = BuildRuntimeElementId(node.Visual);
+            if (string.IsNullOrWhiteSpace(runtimeId))
+            {
+                return null;
+            }
+
+            try
+            {
+                var mutable = mutableDocument ?? await _xamlAstWorkspace.GetMutableDocumentAsync(path).ConfigureAwait(false);
+                if (mutable.TryGetDescriptor(runtimeId, out var descriptor) && DescriptorMatchesNode(node, descriptor))
+                {
+                    return descriptor;
+                }
+
+                var elementName = node.ElementName ?? (node.Visual as INamed)?.Name;
+                if (!string.IsNullOrWhiteSpace(elementName) &&
+                    mutable.TryGetDescriptor(elementName!, out descriptor) &&
+                    DescriptorMatchesNode(node, descriptor))
+                {
+                    return descriptor;
+                }
+            }
+            catch
+            {
+                // Best effort; fallback to heuristics.
+            }
+
+            return null;
         }
 
         private XamlAstNodeDescriptor? ResolveDescriptor(IXamlAstIndex index, TreeNode node, SourceInfo? info)
@@ -2998,6 +3131,7 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             InvalidateDocumentIndices(e.Path);
+            _ = RefreshDocumentDescriptorsAsync(e.Path);
 
             var currentPath = ResolveSelectedDocumentPath();
             if (string.IsNullOrWhiteSpace(currentPath) || !PathsEqual(currentPath!, e.Path))
@@ -3042,6 +3176,7 @@ namespace Avalonia.Diagnostics.ViewModels
             if (!string.IsNullOrEmpty(e.Path))
             {
                 InvalidateDocumentIndices(e.Path!);
+                _ = RefreshDocumentDescriptorsAsync(e.Path!);
             }
 
             var currentPath = ResolveSelectedDocumentPath();

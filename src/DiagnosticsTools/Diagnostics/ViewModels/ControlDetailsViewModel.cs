@@ -701,7 +701,22 @@ namespace Avalonia.Diagnostics.ViewModels
             MutationStatusMessage = null;
 
             var preview = await changeEmitter.PreviewLocalValueChangeAsync(context, newValue, previous, gesture, command, additionalContexts, additionalPreviousValues).ConfigureAwait(false);
-            var decision = await ShowMutationPreviewAsync(context, preview).ConfigureAwait(false);
+            var skipPreview = ShouldBypassPreview(preview);
+
+            MutationPreviewDecision decision;
+            if (skipPreview)
+            {
+                if (!string.IsNullOrWhiteSpace(preview.Message))
+                {
+                    MutationStatusMessage = preview.Message;
+                }
+
+                decision = MutationPreviewDecision.Apply;
+            }
+            else
+            {
+                decision = await ShowMutationPreviewAsync(context, preview).ConfigureAwait(false);
+            }
             if (decision != MutationPreviewDecision.Apply)
             {
                 viewModel.ActiveEditorCommand = EditorCommandDescriptor.Default;
@@ -923,6 +938,23 @@ namespace Avalonia.Diagnostics.ViewModels
                 tcs.TrySetResult(result);
             });
             return await tcs.Task.ConfigureAwait(false);
+        }
+
+        private static bool ShouldBypassPreview(MutationPreviewResult preview)
+        {
+            if (preview.Status == ChangeDispatchStatus.Success)
+            {
+                return false;
+            }
+
+            var message = preview.Message;
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return false;
+            }
+
+            return string.Equals(message, PropertyInspectorChangeEmitter.DispatcherPreviewUnsupportedMessage, StringComparison.Ordinal) ||
+                   string.Equals(message, XamlMutationDispatcher.MutablePipelinePreviewUnsupportedMessage, StringComparison.Ordinal);
         }
 
         private async Task RevertPropertyAsync(PropertyChangeContext context, AvaloniaPropertyViewModel viewModel, object? previous)

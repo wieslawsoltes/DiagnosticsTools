@@ -12,51 +12,57 @@
 
 ## Workstream Overview
 
-1. **Introduce a Writable AST Layer**
-   - Define mutation-friendly wrapper nodes (`MutableXamlElement`, `MutableXamlAttribute`, etc.).
-   - Provide conversion from `XamlAstNodeDescriptor` → mutable node and back.
-   - Preserve trivia (whitespace, formatting) so serialization can round-trip.
+1. [x] **Introduce a Writable AST Layer**
+   - [x] Define mutation-friendly wrapper nodes (`MutableXamlElement`, `MutableXamlAttribute`, etc.).
+   - [x] Provide conversion from `XamlAstNodeDescriptor` → mutable node and back.
+   - [x] Preserve trivia (whitespace, formatting) so serialization can round-trip.
 
-2. **Extend Workspace API**
-   - Add `GetMutableDocumentAsync(path)` returning a mutable tree plus version metadata.
-   - Provide `CommitMutableDocument(path, mutableDocument)` that:
-     - Serializes back to XAML text.
-     - Updates workspace caches and raises `DocumentChanged`.
+2. [x] **Extend Workspace API**
+   - [x] Add `GetMutableDocumentAsync(path)` returning a mutable tree plus version metadata.
+   - [x] Provide `CommitMutableDocument(path, mutableDocument)` that:
+     - [x] Serializes back to XAML text.
+     - [x] Updates workspace caches and raises `DocumentChanged`.
 
-3. **Update Mutation Dispatcher**
-   - Replace text-edit generation in `XamlMutationEditBuilder` with AST mutations:
-     - Locate target node via descriptor ID → mutable node map.
-     - Apply property/attribute/element changes directly on the mutable tree.
-   - On commit:
-     - Serialize mutated tree.
-     - Persist file and register entry in mutation journal using before/after text.
+3. [x] **Update Mutation Dispatcher**
+   - [x] Replace text-edit generation in `XamlMutationEditBuilder` with AST mutations:
+     - [x] Locate target node via descriptor ID → mutable node map.
+     - [x] Apply property edits, including attribute add/remove, directly on the mutable tree.
+     - [x] Support element removal on the mutable tree with descriptor map rebuilds.
+     - [x] Handle element insertion/replacement (upsert) on the mutable tree.
+   - [x] On commit:
+     - [x] Serialize mutated tree.
+     - [x] Persist file and register entry in mutation journal using before/after text.
+   - [x] Default `UseMutablePipeline` to the AST path for dispatcher operations (UI toggle still pending).
+   - [x] Retire legacy text-edit mutation logic once AST pipeline reaches parity.
 
-4. **Descriptor Mapping Improvements**
-   - Maintain a stable descriptor-to-node map inside mutable documents for fast lookup.
-   - On each mutation, update the map instead of recomputing descriptors from spans.
-   - Expose APIs for diagnostics UI to retrieve descriptors by runtime node ID.
+4. [x] **Descriptor Mapping Improvements**
+   - [x] Maintain a stable descriptor-to-node map inside mutable documents for fast lookup.
+   - [x] On each mutation, update the map instead of recomputing descriptors from spans.
+   - [x] Expose APIs for diagnostics UI to retrieve descriptors by runtime node ID.
 
-5. **Selection & Synchronization**
-   - Adjust `TreePageViewModel` to pull descriptors from the new map rather than heuristics.
-   - When workspace invalidates documents, rebuild the map once and broadcast updates to the tree.
+5. [x] **Selection & Synchronization**
+   - [x] Adjust `TreePageViewModel` to pull descriptors from the new map rather than heuristics.
+   - [x] When workspace invalidates documents, rebuild the map once and broadcast updates to the tree.
 
-6. **Undo/Redo Integration**
-   - Store serialized snapshots (pre/post) in the journal as today.
-   - When undoing/redoing, load mutable tree from snapshot, commit via workspace API to keep caches consistent.
+6. [x] **Undo/Redo Integration**
+   - [x] Store serialized snapshots (pre/post) in the journal as today.
+   - [x] When undoing/redoing, load mutable tree from snapshot, commit via workspace API to keep caches consistent.
+   - [x] Port undo/redo execution paths to operate on mutable documents without falling back to text edits.
 
-7. **Incremental Rollout**
-   - Phase 1: Implement mutable layer and make dispatcher opt-in (behind flag) for property changes.
-   - Phase 2: Migrate node deletion, insert, rename operations.
-   - Phase 3: Remove legacy text-edit path once parity is proven.
+7. [x] **Incremental Rollout**
+   - [x] Phase 1: Implement mutable layer and make dispatcher opt-in (behind flag) for property changes.
+   - [x] Phase 2: Migrate node deletion, insert, rename operations.
+   - [x] Phase 3: Remove legacy text-edit path once parity is proven.
 
-8. **Tooling & Tests**
-   - Add unit tests for AST mutations covering attributes, nested elements, namespace handling.
-   - Provide integration tests that run property change + undo/redo on sample XAML and assert serialized output.
-   - Benchmark serialization to ensure acceptable latency for large documents.
+8. [ ] **Tooling & Tests**
+   - [x] Add unit tests for AST mutations covering attributes, nested elements, namespace handling.
+   - [x] Provide integration tests that run property change + undo/redo on sample XAML and assert serialized output.
+   - [ ] Benchmark serialization to ensure acceptable latency for large documents.
+   - [x] Add regression tests that exercise the mutable serializer and dispatcher end-to-end.
 
-9. **Documentation & Migration**
-   - Document new workspace APIs for future extensions.
-  - Provide guidance for contributors on writing AST mutations instead of text edits.
+9. [ ] **Documentation & Migration**
+   - [ ] Document new workspace APIs for future extensions.
+   - [ ] Provide guidance for contributors on writing AST mutations instead of text edits.
 
 ## Risks & Mitigations
 - **Formatting drift**: Preserve trivia and spacing when mutating; include tests that assert output matches input formatting.
@@ -69,4 +75,3 @@
 3. Undo/redo compatibility verified.
 4. All mutation types (add/remove/reorder) migrated.
 5. Legacy text-edit code removed; documentation updated.
-

@@ -140,8 +140,9 @@ public class XamlMutationDispatcherTests : IDisposable
         var dispatcher = new XamlMutationDispatcher(workspace);
         var preview = await dispatcher.PreviewAsync(envelope);
 
-        Assert.Equal(ChangeDispatchStatus.Success, preview.Status);
-        Assert.Contains("IsChecked=\"True\"", preview.PreviewText, StringComparison.Ordinal);
+        Assert.Equal(ChangeDispatchStatus.MutationFailure, preview.Status);
+        Assert.Equal(XamlMutationDispatcher.MutablePipelinePreviewUnsupportedMessage, preview.Message);
+        Assert.Equal(initial, preview.PreviewText);
     }
 
     [AvaloniaFact]

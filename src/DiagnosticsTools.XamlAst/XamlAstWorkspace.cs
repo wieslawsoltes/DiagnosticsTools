@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Utilities;
@@ -17,8 +19,10 @@ namespace Avalonia.Diagnostics.Xaml
         private readonly IXamlAstInstrumentation _instrumentation;
         private readonly Dictionary<string, IndexCacheEntry> _indexCache;
         private readonly Dictionary<string, DiagnosticsCacheEntry> _diagnosticsCache;
+        private readonly Dictionary<string, MutableCacheEntry> _mutableCache;
         private readonly object _indexCacheGate = new();
         private readonly object _diagnosticsGate = new();
+        private readonly object _mutableGate = new();
         private event EventHandler<XamlDocumentChangedEventArgs>? _documentChanged;
         private event EventHandler<XamlAstNodesChangedEventArgs>? _nodesChanged;
         private event EventHandler<XamlDiagnosticsChangedEventArgs>? _diagnosticsChanged;
@@ -47,6 +51,7 @@ namespace Avalonia.Diagnostics.Xaml
             _instrumentation = instrumentation ?? NullXamlAstInstrumentation.Instance;
             _indexCache = new Dictionary<string, IndexCacheEntry>(PathComparer);
             _diagnosticsCache = new Dictionary<string, DiagnosticsCacheEntry>(PathComparer);
+            _mutableCache = new Dictionary<string, MutableCacheEntry>(PathComparer);
             _provider.DocumentChanged += HandleProviderDocumentChanged;
             _provider.NodesChanged += HandleProviderNodesChanged;
         }
@@ -111,6 +116,76 @@ namespace Avalonia.Diagnostics.Xaml
             return _provider.GetDocumentAsync(path, cancellationToken);
         }
 
+        public async ValueTask<MutableXamlDocument> GetMutableDocumentAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            EnsureNotDisposed();
+
+            var document = await _provider.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+
+            lock (_mutableGate)
+            {
+                if (_mutableCache.TryGetValue(document.Path, out var cached) &&
+                    cached.Version.Equals(document.Version))
+                {
+                    return cached.Document;
+                }
+            }
+
+            var mutable = MutableXamlDocument.FromDocument(document);
+
+            lock (_mutableGate)
+            {
+                _mutableCache[document.Path] = new MutableCacheEntry(document.Version, mutable);
+            }
+
+            return mutable;
+        }
+
+        public async ValueTask<XamlAstDocument> CommitMutableDocumentAsync(
+            string path,
+            MutableXamlDocument mutableDocument,
+            CancellationToken cancellationToken = default)
+        {
+            EnsureNotDisposed();
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("Path must not be null or whitespace.", nameof(path));
+            }
+
+            if (mutableDocument is null)
+            {
+                throw new ArgumentNullException(nameof(mutableDocument));
+            }
+
+            if (!PathComparer.Equals(path, mutableDocument.Path))
+            {
+                throw new ArgumentException("Mutable document path does not match the target path.", nameof(path));
+            }
+
+            var serialized = MutableXamlSerializer.Serialize(mutableDocument);
+            await WriteDocumentAsync(path, serialized, mutableDocument.SourceDocument.Encoding, mutableDocument.SourceDocument.HasByteOrderMark, cancellationToken)
+                .ConfigureAwait(false);
+
+            RemoveIndexFromCache(path);
+            RemoveDiagnosticsFromCache(path);
+            RemoveMutableFromCache(path);
+
+            _provider.Invalidate(path);
+
+            var updatedDocument = await _provider.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+            var updatedMutable = MutableXamlDocument.FromDocument(updatedDocument);
+
+            lock (_mutableGate)
+            {
+                _mutableCache[updatedDocument.Path] = new MutableCacheEntry(updatedDocument.Version, updatedMutable);
+            }
+
+            return updatedDocument;
+        }
+
         public bool TryGetDiagnostics(string path, out IReadOnlyList<XamlAstDiagnostic> diagnostics)
         {
             EnsureNotDisposed();
@@ -127,6 +202,27 @@ namespace Avalonia.Diagnostics.Xaml
                 {
                     diagnostics = entry.Diagnostics;
                     return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool TryGetRuntimeDescriptor(string path, string runtimeNodeId, out XamlAstNodeDescriptor descriptor)
+        {
+            EnsureNotDisposed();
+            descriptor = null!;
+
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(runtimeNodeId))
+            {
+                return false;
+            }
+
+            lock (_mutableGate)
+            {
+                if (_mutableCache.TryGetValue(path, out var entry))
+                {
+                    return entry.Document.TryGetDescriptor(runtimeNodeId, out descriptor);
                 }
             }
 
@@ -165,6 +261,7 @@ namespace Avalonia.Diagnostics.Xaml
             EnsureNotDisposed();
             RemoveIndexFromCache(path);
             RemoveDiagnosticsFromCache(path);
+            RemoveMutableFromCache(path);
             _provider.Invalidate(path);
         }
 
@@ -173,6 +270,7 @@ namespace Avalonia.Diagnostics.Xaml
             EnsureNotDisposed();
             ClearIndexCache();
             ClearDiagnosticsCache();
+            ClearMutableCache();
             _provider.InvalidateAll();
         }
 
@@ -188,6 +286,7 @@ namespace Avalonia.Diagnostics.Xaml
             _provider.NodesChanged -= HandleProviderNodesChanged;
             ClearIndexCache();
             ClearDiagnosticsCache();
+            ClearMutableCache();
             _provider.Dispose();
         }
 
@@ -210,10 +309,12 @@ namespace Avalonia.Diagnostics.Xaml
             {
                 ClearIndexCache();
                 ClearDiagnosticsCache();
+                ClearMutableCache();
             }
             else
             {
                 RemoveIndexFromCache(e.Path);
+                RemoveMutableFromCache(e.Path);
 
                 if (e.Kind == XamlDocumentChangeKind.Invalidated)
                 {
@@ -290,6 +391,68 @@ namespace Avalonia.Diagnostics.Xaml
             {
                 _diagnosticsCache.Clear();
             }
+        }
+
+        private void RemoveMutableFromCache(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            lock (_mutableGate)
+            {
+                _mutableCache.Remove(path!);
+            }
+        }
+
+        private void ClearMutableCache()
+        {
+            lock (_mutableGate)
+            {
+                _mutableCache.Clear();
+            }
+        }
+
+        private static async Task WriteDocumentAsync(
+            string path,
+            string text,
+            Encoding encoding,
+            bool hasByteOrderMark,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("Path must not be null or whitespace.", nameof(path));
+            }
+
+            if (text is null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+
+            encoding ??= new UTF8Encoding(false);
+
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+
+            if (hasByteOrderMark)
+            {
+                var preamble = encoding.GetPreamble();
+                if (preamble.Length > 0)
+                {
+                    await stream.WriteAsync(preamble, 0, preamble.Length, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            var bytes = encoding.GetBytes(text);
+            await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
         private void RemoveIndexFromCache(string? path)
@@ -372,6 +535,19 @@ namespace Avalonia.Diagnostics.Xaml
             public XamlDocumentVersion Version { get; }
 
             public IReadOnlyList<XamlAstDiagnostic> Diagnostics { get; }
+        }
+
+        private readonly struct MutableCacheEntry
+        {
+            public MutableCacheEntry(XamlDocumentVersion version, MutableXamlDocument document)
+            {
+                Version = version;
+                Document = document ?? throw new ArgumentNullException(nameof(document));
+            }
+
+            public XamlDocumentVersion Version { get; }
+
+            public MutableXamlDocument Document { get; }
         }
     }
 }

@@ -32,6 +32,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
         private const string DefaultDocumentMode = "Writable";
         private const string AttributeNodeType = "Attribute";
         private const string DefaultValueKind = "Literal";
+        public const string DispatcherPreviewUnsupportedMessage = "Mutation dispatcher does not support preview.";
 
         private readonly IChangeDispatcher _dispatcher;
         private readonly Func<DateTimeOffset> _clock;
@@ -180,7 +181,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 return MutationPreviewResult.Failure(
                     ChangeDispatchStatus.MutationFailure,
-                    "Mutation dispatcher does not support preview.",
+                    DispatcherPreviewUnsupportedMessage,
                     context.Document?.Text ?? string.Empty,
                     Array.Empty<ChangeOperation>());
             }
