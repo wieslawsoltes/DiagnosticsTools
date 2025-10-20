@@ -135,7 +135,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return OperationOutcome.Failed(failure);
             }
 
-            if (attributeName!.Contains('.') &&
+            if (attributeName!.Contains(".") &&
                 !ValidateParentGuard(guardDocument, guardIndex, descriptor, operation, out failure))
             {
                 return OperationOutcome.Failed(failure);
