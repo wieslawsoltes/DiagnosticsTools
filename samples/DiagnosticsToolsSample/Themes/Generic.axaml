@@ -1,0 +1,56 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="using:Avalonia.Animation"
+        xmlns:controls="using:DiagnosticsToolsSample.Controls">
+    <Style Selector="controls|Badge">
+        <Setter Property="Background" Value="#FFE2E8F0"/>
+        <Setter Property="Foreground" Value="#FF1F2937"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="Template">
+            <ControlTemplate TargetType="controls:Badge">
+                <Border x:Name="Root"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Padding="{TemplateBinding Padding}">
+                    <Border.Transitions>
+                        <Transitions>
+                            <animations:BrushTransition Property="Background" Duration="0:0:0.12"/>
+                            <animations:BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
+                        </Transitions>
+                    </Border.Transitions>
+                    <TextBlock Text="{TemplateBinding Text}"
+                               Foreground="{TemplateBinding Foreground}"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|Badge.success">
+        <Setter Property="Background" Value="#FFDCFCE7"/>
+        <Setter Property="Foreground" Value="#FF166534"/>
+    </Style>
+
+    <Style Selector="controls|Badge.warning">
+        <Setter Property="Background" Value="#FFFEF3C7"/>
+        <Setter Property="Foreground" Value="#FF92400E"/>
+    </Style>
+
+    <Style Selector="controls|Badge.info">
+        <Setter Property="Background" Value="#FFE0F2FE"/>
+        <Setter Property="Foreground" Value="#FF1D4ED8"/>
+    </Style>
+
+    <Style Selector="controls|Badge.outline">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="#FF94A3B8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="#FF1F2937"/>
+    </Style>
+</Styles>

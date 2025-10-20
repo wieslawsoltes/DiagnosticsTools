@@ -98,6 +98,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
         [JsonPropertyName("propertyPath")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? PropertyPath { get; init; }
+
+        [JsonPropertyName("scopeDescription")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ScopeDescription { get; init; }
     }
 
     public sealed class ChangeGuardsInfo

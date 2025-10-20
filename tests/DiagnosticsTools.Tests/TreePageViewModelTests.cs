@@ -30,7 +30,7 @@ public class TreePageViewModelTests
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
         using var workspace = new XamlAstWorkspace();
         var coordinator = new SelectionCoordinator();
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree");
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree");
 
         treeViewModel.TreeFilter.FilterString = "StackPanel";
 
@@ -53,7 +53,7 @@ public class TreePageViewModelTests
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
         using var workspace = new XamlAstWorkspace();
         var coordinator = new SelectionCoordinator();
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree");
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree");
 
         treeViewModel.TreeFilter.FilterString = "Button";
 
@@ -75,7 +75,7 @@ public class TreePageViewModelTests
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
         using var workspace = new XamlAstWorkspace();
         var coordinator = new SelectionCoordinator();
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree");
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree");
 
         var rootNode = Assert.Single(treeViewModel.Nodes);
         var childNode = Assert.Single(rootNode.Children);
@@ -101,7 +101,7 @@ public class TreePageViewModelTests
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
         using var workspace = new XamlAstWorkspace();
         var coordinator = new SelectionCoordinator();
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree");
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree");
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Name;
         treeViewModel.TreeFilter.FilterString = "PART_Control";
@@ -125,7 +125,7 @@ public class TreePageViewModelTests
         using var mainViewModel = new MainViewModel(root, sourceInfoService, sourceNavigator);
         using var workspace = new XamlAstWorkspace();
         var coordinator = new SelectionCoordinator();
-        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree");
+        using var treeViewModel = new TreePageViewModel(mainViewModel, VisualTreeNode.Create(root), new HashSet<string>(), sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree");
 
         treeViewModel.SelectedTreeSearchField = TreeSearchField.Classes;
         treeViewModel.TreeFilter.FilterString = ".highlighted";
@@ -178,6 +178,8 @@ public class TreePageViewModelTests
                 navigator,
                 workspace,
                 new RuntimeMutationCoordinator(),
+                null,
+                null,
                 coordinator,
                 "Test.Tree");
 
@@ -258,6 +260,8 @@ public class TreePageViewModelTests
                 navigator,
                 workspace,
                 new RuntimeMutationCoordinator(),
+                null,
+                null,
                 coordinator,
                 "Test.Tree");
 

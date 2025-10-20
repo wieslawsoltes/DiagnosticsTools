@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Diagnostics.PropertyEditing;
+using Avalonia.Diagnostics.Services;
 using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Xaml;
@@ -20,9 +22,11 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
             RuntimeMutationCoordinator runtimeCoordinator,
+            ITemplateSourceResolver? templateSourceResolver,
+            ITemplateOverrideService? templateOverrideService,
             SelectionCoordinator selectionCoordinator,
             string selectionOwnerId)
-            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId)
+            : base(mainView, nodes, pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, templateSourceResolver, templateOverrideService, selectionCoordinator, selectionOwnerId)
         {
         }
 
@@ -48,16 +52,18 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
             RuntimeMutationCoordinator runtimeCoordinator,
+            ITemplateSourceResolver? templateSourceResolver,
+            ITemplateOverrideService? templateOverrideService,
             SelectionCoordinator selectionCoordinator,
             string selectionOwnerId)
         {
             var nodes = CombinedTreeNode.Create(root);
             if (nodes.Length == 0)
             {
-                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId);
+                return new CombinedTreePageViewModel(mainView, Array.Empty<TreeNode>(), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, templateSourceResolver, templateOverrideService, selectionCoordinator, selectionOwnerId);
             }
 
-            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, selectionCoordinator, selectionOwnerId);
+            return new CombinedTreePageViewModel(mainView, Array.ConvertAll(nodes, x => (TreeNode)x), pinnedProperties, sourceInfoService, sourceNavigator, xamlAstWorkspace, runtimeCoordinator, templateSourceResolver, templateOverrideService, selectionCoordinator, selectionOwnerId);
         }
 
         protected override bool CanNodeMatch(TreeNode node)

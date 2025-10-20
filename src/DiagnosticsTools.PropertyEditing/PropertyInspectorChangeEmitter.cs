@@ -102,8 +102,13 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 newValue,
                 gesture,
                 commandDescriptor);
-            var envelope = plan.Envelope;
-            var mutationTargets = plan.Targets;
+            var envelopePlans = plan.Envelopes;
+            var mutationTargets = plan.AllTargets;
+
+            if (!ValidateRuntimeFingerprints(mutationTargets, out var fingerprintFailure))
+            {
+                return ChangeDispatchResult.GuardFailure(null, fingerprintFailure);
+            }
 
             var pendingPaths = new HashSet<string>(PathComparer);
             foreach (var target in mutationTargets)
@@ -124,18 +129,52 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             try
             {
-                var result = await DispatchAsync(envelope, cancellationToken).ConfigureAwait(false);
-                if (result.Status == ChangeDispatchStatus.Success)
+                ChangeDispatchResult result;
+
+                if (envelopePlans.Count == 1)
                 {
-                    mutationApplied = true;
-                    foreach (var target in mutationTargets)
+                    var envelopePlan = envelopePlans[0];
+                    result = await DispatchAsync(envelopePlan.Envelope, cancellationToken).ConfigureAwait(false);
+                    if (result.Status == ChangeDispatchStatus.Success)
                     {
-                        UpdateMutationOriginBaseline(
-                            target.OriginKey,
-                            target.Origin,
-                            target.ShouldUnset,
-                            target.AttributeValue,
-                            newValue);
+                        mutationApplied = true;
+                        foreach (var target in envelopePlan.Targets)
+                        {
+                            UpdateMutationOriginBaseline(
+                                target.OriginKey,
+                                target.Origin,
+                                target.ShouldUnset,
+                                target.AttributeValue,
+                                newValue);
+                        }
+                    }
+                }
+                else
+                {
+                    var batch = new ChangeBatch
+                    {
+                        BatchId = plan.BatchId,
+                        InitiatedAt = plan.InitiatedAt,
+                        Source = envelopePlans[0].Envelope.Source,
+                        Documents = envelopePlans.Select(p => p.Envelope).ToArray()
+                    };
+
+                    result = await DispatchAsync(batch, envelopePlans, cancellationToken).ConfigureAwait(false);
+                    if (result.Status == ChangeDispatchStatus.Success)
+                    {
+                        mutationApplied = true;
+                        foreach (var envelopePlan in envelopePlans)
+                        {
+                            foreach (var target in envelopePlan.Targets)
+                            {
+                                UpdateMutationOriginBaseline(
+                                    target.OriginKey,
+                                    target.Origin,
+                                    target.ShouldUnset,
+                                    target.AttributeValue,
+                                    newValue);
+                            }
+                        }
                     }
                 }
 
@@ -192,7 +231,17 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 newValue,
                 gesture,
                 commandDescriptor);
-            return await xamlDispatcher.PreviewAsync(plan.Envelope, cancellationToken).ConfigureAwait(false);
+            var envelope = plan.Envelopes.Count > 0 ? plan.Envelopes[0].Envelope : null;
+            if (envelope is null)
+            {
+                return MutationPreviewResult.Failure(
+                    ChangeDispatchStatus.MutationFailure,
+                    "No mutation envelope was generated for preview.",
+                    context.Document?.Text ?? string.Empty,
+                    Array.Empty<ChangeOperation>());
+            }
+
+            return await xamlDispatcher.PreviewAsync(envelope, cancellationToken).ConfigureAwait(false);
         }
 
         public event EventHandler<MutationCompletedEventArgs>? ChangeCompleted;
@@ -363,31 +412,30 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 throw new ArgumentException("At least one mutation target is required.", nameof(targets));
             }
 
-            var primary = targets[0];
-            var primaryContext = primary.Context;
+            var primaryContext = targets[0].Context;
+            var primaryProperty = primaryContext.Property;
 
-            var documentPath = primaryContext.Document.Path;
             foreach (var target in targets)
             {
-                if (!string.Equals(target.Context.Document.Path, documentPath, PathComparison))
-                {
-                    throw new InvalidOperationException("Multi-selection edits require all targets to originate from the same XAML document.");
-                }
-
-                if (!ReferenceEquals(target.Context.Property, primaryContext.Property))
+                if (!ReferenceEquals(target.Context.Property, primaryProperty))
                 {
                     throw new InvalidOperationException("Multi-selection edits require all targets to reference the same AvaloniaProperty.");
                 }
             }
 
-            var attributeName = BuildAttributeName(primaryContext.Property);
+            var attributeName = BuildAttributeName(primaryProperty);
             var valueKind = DetermineValueKind(newValue);
             var bindingPayload = BuildBindingPayload(newValue);
             var resourcePayload = BuildResourcePayload(newValue);
-            var adjustedCommand = EnsureCommandDescriptor(commandDescriptor, primaryContext.Property.PropertyType, newValue, gesture);
+            var adjustedCommand = EnsureCommandDescriptor(commandDescriptor, primaryProperty.PropertyType, newValue, gesture);
 
-            var operations = new List<ChangeOperation>(targets.Count);
-            var mutationTargets = new List<MutationTargetPlan>(targets.Count);
+            var batchId = _idProvider();
+            var initiatedAt = _clock();
+
+            var documentBuilders = new Dictionary<string, DocumentMutationBuilder>(PathComparer);
+            var documentOrder = new List<string>();
+            var allTargets = new List<MutationTargetPlan>(targets.Count);
+            var operationIndex = 0;
 
             for (var index = 0; index < targets.Count; index++)
             {
@@ -400,6 +448,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 var effectiveBindingPayload = shouldUnset ? null : bindingPayload;
                 var effectiveResourcePayload = shouldUnset ? null : resourcePayload;
                 var valueText = shouldUnset ? null : DetermineAttributeValueText(context.Property, newValue, origin);
+                var runtimeFingerprint = BuildElementId(context.Target);
 
                 var operation = BuildSetAttributeOperation(
                     context,
@@ -411,14 +460,43 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     shouldUnset,
                     gesture,
                     adjustedCommand,
-                    index);
+                    operationIndex++);
 
-                operations.Add(operation);
-                mutationTargets.Add(new MutationTargetPlan(context, origin, originKey, shouldUnset, valueText));
+                var mutationTarget = new MutationTargetPlan(context, origin, originKey, shouldUnset, valueText, runtimeFingerprint);
+                allTargets.Add(mutationTarget);
+
+                var path = context.Document.Path ?? string.Empty;
+                var normalizedPath = path;
+
+                if (!documentBuilders.TryGetValue(normalizedPath, out var builder))
+                {
+                    builder = new DocumentMutationBuilder(context);
+                    documentBuilders[normalizedPath] = builder;
+                    documentOrder.Add(normalizedPath);
+                }
+
+                builder.Operations.Add(operation);
+                builder.Targets.Add(mutationTarget);
             }
 
-            var envelope = BuildSetAttributeEnvelope(primaryContext, gesture, adjustedCommand, operations, mutationTargets);
-            return new LocalValueMutationPlan(envelope, mutationTargets, adjustedCommand);
+            var envelopes = new List<ChangeEnvelopePlan>(documentBuilders.Count);
+            foreach (var key in documentOrder)
+            {
+                var builder = documentBuilders[key];
+                var operations = builder.Operations.ToArray();
+                var targetsForDocument = builder.Targets.ToArray();
+                var envelope = BuildSetAttributeEnvelope(
+                    batchId,
+                    initiatedAt,
+                    builder.PrimaryContext,
+                    gesture,
+                    adjustedCommand,
+                    operations,
+                    targetsForDocument);
+                envelopes.Add(new ChangeEnvelopePlan(envelope, targetsForDocument));
+            }
+
+            return new LocalValueMutationPlan(batchId, initiatedAt, envelopes, allTargets, adjustedCommand);
         }
 
         private NamespaceRequirement? DetermineNamespaceRequirement(PropertyChangeContext context, string attributeName, string? valueText)
@@ -782,6 +860,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
         }
 
         private ChangeEnvelope BuildSetAttributeEnvelope(
+            Guid batchId,
+            DateTimeOffset initiatedAt,
             PropertyChangeContext primaryContext,
             string gesture,
             EditorCommandDescriptor command,
@@ -804,7 +884,9 @@ namespace Avalonia.Diagnostics.PropertyEditing
             var property = primaryContext.Property;
             var target = primaryContext.Target;
             var descriptor = primaryContext.Descriptor;
-            var elementId = BuildElementId(target);
+            var elementId = mutationTargets.Count > 0
+                ? mutationTargets[0].RuntimeFingerprint
+                : BuildElementId(target);
             var propertyQualifiedName = $"{property.OwnerType.Name}.{property.Name}";
 
             var changes = new ChangeOperation[effectiveOperations.Count];
@@ -815,8 +897,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             return new ChangeEnvelope
             {
-                BatchId = _idProvider(),
-                InitiatedAt = _clock(),
+                BatchId = batchId,
+                InitiatedAt = initiatedAt,
                 Source = new ChangeSourceInfo
                 {
                     Inspector = InspectorName,
@@ -837,7 +919,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                     Property = propertyQualifiedName,
                     PropertyPath = propertyQualifiedName,
                     Frame = primaryContext.Frame,
-                    ValueSource = primaryContext.ValueSource
+                    ValueSource = primaryContext.ValueSource,
+                    ScopeDescription = primaryContext.ScopeDescription
                 },
                 Guards = new ChangeGuardsInfo
                 {
@@ -1231,6 +1314,30 @@ namespace Avalonia.Diagnostics.PropertyEditing
                    Equals(first.FallbackValue, second.FallbackValue);
         }
 
+        private static bool ValidateRuntimeFingerprints(
+            IReadOnlyList<MutationTargetPlan> targets,
+            out string? failureMessage)
+        {
+            if (targets is null || targets.Count == 0)
+            {
+                failureMessage = null;
+                return true;
+            }
+
+            foreach (var target in targets)
+            {
+                var currentFingerprint = BuildElementId(target.Context.Target);
+                if (!string.Equals(currentFingerprint, target.RuntimeFingerprint, StringComparison.Ordinal))
+                {
+                    failureMessage = "Runtime element changed since the template preview was generated. Refresh the selection and try again.";
+                    return false;
+                }
+            }
+
+            failureMessage = null;
+            return true;
+        }
+
         private async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken)
         {
             var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
@@ -1258,6 +1365,57 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
                 MutationTelemetry.ReportMutation(envelope, failure, duration, provenance);
                 OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure, provenance));
+                return failure;
+            }
+        }
+
+        private async ValueTask<ChangeDispatchResult> DispatchAsync(
+            ChangeBatch batch,
+            IReadOnlyList<ChangeEnvelopePlan> plans,
+            CancellationToken cancellationToken)
+        {
+            if (batch is null)
+            {
+                throw new ArgumentNullException(nameof(batch));
+            }
+
+            var startTimestamp = Stopwatch.GetTimestamp();
+
+            try
+            {
+                var result = await _dispatcher.DispatchAsync(batch, cancellationToken).ConfigureAwait(false);
+                var duration = CalculateElapsed(startTimestamp);
+
+                foreach (var plan in plans)
+                {
+                    var envelope = plan.Envelope;
+                    var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
+                    MutationTelemetry.ReportMutation(envelope, result, duration, provenance);
+                    if (!_dispatcherProvidesNotifications)
+                    {
+                        OnChangeCompleted(new MutationCompletedEventArgs(envelope, result, provenance));
+                    }
+                }
+
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var duration = CalculateElapsed(startTimestamp);
+                var failure = ChangeDispatchResult.MutationFailure(null, $"Change dispatch failed: {ex.Message}");
+
+                foreach (var plan in plans)
+                {
+                    var envelope = plan.Envelope;
+                    var provenance = MutationProvenanceHelper.FromEnvelope(envelope);
+                    MutationTelemetry.ReportMutation(envelope, failure, duration, provenance);
+                    OnChangeCompleted(new MutationCompletedEventArgs(envelope, failure, provenance));
+                }
+
                 return failure;
             }
         }
@@ -1305,17 +1463,40 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
         }
 
+        private sealed class DocumentMutationBuilder
+        {
+            public DocumentMutationBuilder(PropertyChangeContext primaryContext)
+            {
+                PrimaryContext = primaryContext ?? throw new ArgumentNullException(nameof(primaryContext));
+                Operations = new List<ChangeOperation>();
+                Targets = new List<MutationTargetPlan>();
+            }
+
+            public PropertyChangeContext PrimaryContext { get; }
+
+            public List<ChangeOperation> Operations { get; }
+
+            public List<MutationTargetPlan> Targets { get; }
+        }
+
         private sealed record class LocalValueMutationPlan(
-            ChangeEnvelope Envelope,
-            IReadOnlyList<MutationTargetPlan> Targets,
+            Guid BatchId,
+            DateTimeOffset InitiatedAt,
+            IReadOnlyList<ChangeEnvelopePlan> Envelopes,
+            IReadOnlyList<MutationTargetPlan> AllTargets,
             EditorCommandDescriptor Command);
+
+        private sealed record class ChangeEnvelopePlan(
+            ChangeEnvelope Envelope,
+            IReadOnlyList<MutationTargetPlan> Targets);
 
         private readonly record struct MutationTargetPlan(
             PropertyChangeContext Context,
             PropertyMutationOrigin Origin,
             MutationOriginKey OriginKey,
             bool ShouldUnset,
-            string? AttributeValue);
+            string? AttributeValue,
+            string RuntimeFingerprint);
 
         private readonly record struct NamespaceRequirement(string Prefix, string Value);
 

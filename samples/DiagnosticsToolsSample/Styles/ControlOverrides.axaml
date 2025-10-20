@@ -1,0 +1,84 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="using:Avalonia.Animation">
+    <Style Selector="Button.pillTheme">
+        <Setter Property="Background" Value="#FF2563EB"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Padding" Value="18,8"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="24"/>
+        <Setter Property="Template">
+            <ControlTemplate TargetType="Button">
+                <Border Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Padding="{TemplateBinding Padding}">
+                    <Border.Transitions>
+                        <Transitions>
+                            <animations:BrushTransition Property="Background" Duration="0:0:0.12"/>
+                        </Transitions>
+                    </Border.Transitions>
+                    <ContentPresenter HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Foreground="{TemplateBinding Foreground}"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="Button.pillTheme:pointerover">
+        <Setter Property="Background" Value="#FF1D4ED8"/>
+    </Style>
+
+    <Style Selector="Button.pillTheme:pressed">
+        <Setter Property="Background" Value="#FF1E3A8A"/>
+    </Style>
+
+    <Style Selector="Button.pillTheme:disabled">
+        <Setter Property="Background" Value="#FF9CA3AF"/>
+    </Style>
+
+    <Style Selector="ToggleButton.segment">
+        <Setter Property="Background" Value="#FFE2E8F0"/>
+        <Setter Property="Foreground" Value="#FF1F2937"/>
+        <Setter Property="Padding" Value="14,6"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="18"/>
+        <Setter Property="Template">
+            <ControlTemplate TargetType="ToggleButton">
+                <Border Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Padding="{TemplateBinding Padding}">
+                    <Border.Transitions>
+                        <Transitions>
+                            <animations:BrushTransition Property="Background" Duration="0:0:0.12"/>
+                            <animations:BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
+                        </Transitions>
+                    </Border.Transitions>
+                    <ContentPresenter HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Foreground="{TemplateBinding Foreground}"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="ToggleButton.segment:checked">
+        <Setter Property="Background" Value="#FF0F766E"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <Style Selector="ToggleButton.segment:pointerover:not(:checked)">
+        <Setter Property="Background" Value="#FFDCE7FF"/>
+    </Style>
+
+    <Style Selector="ToggleButton.segment:disabled">
+        <Setter Property="Background" Value="#FFE2E8F0"/>
+        <Setter Property="Foreground" Value="#FF94A3B8"/>
+    </Style>
+</Styles>

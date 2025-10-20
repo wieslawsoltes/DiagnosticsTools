@@ -1,10 +1,13 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:styles="clr-namespace:Avalonia.Markup.Xaml.Styling;assembly=Avalonia.Markup.Xaml"
              x:Class="DiagnosticsToolsSample.App"
              RequestedThemeVariant="Default">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
 
     <Application.Styles>
         <FluentTheme />
+        <styles:StyleInclude Source="avares://DiagnosticsToolsSample/Themes/Generic.axaml"/>
+        <styles:StyleInclude Source="avares://DiagnosticsToolsSample/Styles/ControlOverrides.axaml"/>
     </Application.Styles>
 </Application>

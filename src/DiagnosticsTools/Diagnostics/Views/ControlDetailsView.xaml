@@ -69,6 +69,22 @@
                 IsEnabled="{Binding CanRedoMutation}"
                 IsVisible="{Binding ShowMutationCommands}"
                 ToolTip.Tip="Redo XAML update (Ctrl+Shift+Z)" />
+        <TextBlock Grid.Column="2"
+                   Grid.Row="1"
+                   Margin="4 0 0 0"
+                   Text="{Binding UndoMutationDescription}"
+                   TextWrapping="Wrap"
+                   FontSize="11"
+                   Foreground="{DynamicResource ThemeForegroundLowBrush}"
+                   IsVisible="{Binding UndoMutationDescription, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <TextBlock Grid.Column="3"
+                   Grid.Row="1"
+                   Margin="4 0 0 0"
+                   Text="{Binding RedoMutationDescription}"
+                   TextWrapping="Wrap"
+                   FontSize="11"
+                   Foreground="{DynamicResource ThemeForegroundLowBrush}"
+                   IsVisible="{Binding RedoMutationDescription, Converter={x:Static ObjectConverters.IsNotNull}}" />
       </Grid>
       
       <controls:FilterTextBox Grid.Row="1"
@@ -224,19 +240,36 @@
                             ContentTransition="{x:Null}"
                             HorizontalAlignment="Stretch">
                     <Expander.Header>
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="{Binding Description}" />
-                        <Button Content="SRC"
-                                FontSize="10"
-                                FontWeight="Bold"
-                                Command="{Binding NavigateToSourceCommand}"
-                                IsEnabled="{Binding CanNavigateToSource}"
-                                ToolTip.Tip="{Binding SourceSummary}"
-                                IsVisible="{Binding ShowSourceCommands}"/>
-                        <Button Content="Preview"
-                                Command="{Binding PreviewSourceCommand}"
-                                IsEnabled="{Binding CanPreviewSource}"
-                                IsVisible="{Binding ShowSourceCommands}"/>
+                      <StackPanel Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Text="{Binding Description}" />
+                          <Button Content="SRC"
+                                  FontSize="10"
+                                  FontWeight="Bold"
+                                  Command="{Binding NavigateToSourceCommand}"
+                                  IsEnabled="{Binding CanNavigateToSource}"
+                                  ToolTip.Tip="{Binding SourceSummary}"
+                                  IsVisible="{Binding ShowSourceCommands}"/>
+                          <Button Content="Preview"
+                                  Command="{Binding PreviewSourceCommand}"
+                                  IsEnabled="{Binding CanPreviewSource}"
+                                  IsVisible="{Binding ShowSourceCommands}"/>
+                          <Button Content="Fork Template"
+                                  Command="{Binding ForkTemplateCommand}"
+                                  IsEnabled="{Binding CanForkTemplate}"
+                                  IsVisible="{Binding ShowForkTemplateCommand}"
+                                  FontSize="10"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding TemplateScopeDescription}"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource ThemeForegroundLowBrush}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding HasTemplateScope}"/>
+                        <TextBlock Text="{Binding TemplateOverrideStatusMessage}"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource ThemeAccentBrush}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding HasTemplateOverrideStatusMessage}"/>
                       </StackPanel>
                     </Expander.Header>
 

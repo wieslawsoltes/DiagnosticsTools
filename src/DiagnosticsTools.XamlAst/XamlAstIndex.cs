@@ -19,6 +19,8 @@ namespace Avalonia.Diagnostics.Xaml
 
         IReadOnlyList<XamlStyleDescriptor> Styles { get; }
 
+        IReadOnlyList<XamlTemplateBindingDescriptor> TemplateBindings { get; }
+
         bool TryGetDescriptor(XamlAstNodeId id, out XamlAstNodeDescriptor descriptor);
 
         IReadOnlyList<XamlAstNodeDescriptor> FindByName(string name);
@@ -36,6 +38,7 @@ namespace Avalonia.Diagnostics.Xaml
         private readonly IReadOnlyList<XamlNameScopeDescriptor> _nameScopes;
         private readonly IReadOnlyList<XamlBindingDescriptor> _bindings;
         private readonly IReadOnlyList<XamlStyleDescriptor> _styles;
+        private readonly IReadOnlyList<XamlTemplateBindingDescriptor> _templateBindings;
 
         private XamlAstIndex(
             IReadOnlyList<XamlAstNodeDescriptor> nodes,
@@ -45,7 +48,8 @@ namespace Avalonia.Diagnostics.Xaml
             IReadOnlyList<XamlResourceDescriptor> resources,
             IReadOnlyList<XamlNameScopeDescriptor> nameScopes,
             IReadOnlyList<XamlBindingDescriptor> bindings,
-            IReadOnlyList<XamlStyleDescriptor> styles)
+            IReadOnlyList<XamlStyleDescriptor> styles,
+            IReadOnlyList<XamlTemplateBindingDescriptor> templateBindings)
         {
             _nodes = nodes;
             _nodesById = nodesById;
@@ -55,6 +59,7 @@ namespace Avalonia.Diagnostics.Xaml
             _nameScopes = nameScopes;
             _bindings = bindings;
             _styles = styles;
+            _templateBindings = templateBindings;
         }
 
         public IEnumerable<XamlAstNodeDescriptor> Nodes => _nodes;
@@ -66,6 +71,8 @@ namespace Avalonia.Diagnostics.Xaml
         public IReadOnlyList<XamlBindingDescriptor> Bindings => _bindings;
 
         public IReadOnlyList<XamlStyleDescriptor> Styles => _styles;
+
+        public IReadOnlyList<XamlTemplateBindingDescriptor> TemplateBindings => _templateBindings;
 
         public bool TryGetDescriptor(XamlAstNodeId id, out XamlAstNodeDescriptor descriptor) =>
             _nodesById.TryGetValue(id, out descriptor);
@@ -107,6 +114,7 @@ namespace Avalonia.Diagnostics.Xaml
             var nameScopes = new List<XamlNameScopeDescriptor>();
             var bindings = new List<XamlBindingDescriptor>();
             var styles = new List<XamlStyleDescriptor>();
+            var templateBindings = new List<XamlTemplateBindingDescriptor>();
 
             if (document.Syntax.RootSyntax is { } root)
             {
@@ -119,7 +127,8 @@ namespace Avalonia.Diagnostics.Xaml
                     resources,
                     nameScopes,
                     bindings,
-                    styles);
+                    styles,
+                    templateBindings);
                 visitor.Visit(root.AsNode, new List<int> { 0 });
             }
 
@@ -133,7 +142,8 @@ namespace Avalonia.Diagnostics.Xaml
                 resources.AsReadOnly(),
                 nameScopes.AsReadOnly(),
                 bindings.AsReadOnly(),
-                styles.AsReadOnly());
+                styles.AsReadOnly(),
+                templateBindings.AsReadOnly());
         }
 
         private sealed class Builder
@@ -147,7 +157,11 @@ namespace Avalonia.Diagnostics.Xaml
             private readonly List<XamlNameScopeDescriptor> _nameScopes;
             private readonly List<XamlBindingDescriptor> _bindings;
             private readonly List<XamlStyleDescriptor> _styles;
+            private readonly List<XamlTemplateBindingDescriptor> _templateBindings;
             private readonly Stack<ScopeFrame> _scopeStack;
+            private readonly Stack<XamlAstNodeDescriptor> _nodeStack;
+            private readonly Stack<PropertyTemplateContext> _templateContextStack;
+            private readonly Dictionary<XamlAstNodeDescriptor, SetterTemplateMetadata> _setterTemplateMetadata;
 
             public Builder(
                 XamlAstDocument document,
@@ -158,7 +172,8 @@ namespace Avalonia.Diagnostics.Xaml
                 List<XamlResourceDescriptor> resources,
                 List<XamlNameScopeDescriptor> nameScopes,
                 List<XamlBindingDescriptor> bindings,
-                List<XamlStyleDescriptor> styles)
+                List<XamlStyleDescriptor> styles,
+                List<XamlTemplateBindingDescriptor> templateBindings)
             {
                 _document = document;
                 _nodes = nodes;
@@ -170,6 +185,10 @@ namespace Avalonia.Diagnostics.Xaml
                 _bindings = bindings;
                 _styles = styles;
                 _scopeStack = new Stack<ScopeFrame>();
+                _templateBindings = templateBindings;
+                _nodeStack = new Stack<XamlAstNodeDescriptor>();
+                _templateContextStack = new Stack<PropertyTemplateContext>();
+                _setterTemplateMetadata = new Dictionary<XamlAstNodeDescriptor, SetterTemplateMetadata>();
             }
 
             public void Visit(XmlNodeSyntax node, List<int> path)
@@ -187,7 +206,15 @@ namespace Avalonia.Diagnostics.Xaml
 
             private void AppendElement(IXmlElementSyntax element, List<int> path)
             {
+                var parentDescriptor = _nodeStack.Count > 0 ? _nodeStack.Peek() : null;
                 var descriptor = CreateDescriptor(element, path);
+
+                if (parentDescriptor is not null &&
+                    TryGetActiveTemplateContext(parentDescriptor, out var activeTemplateContext))
+                {
+                    UpdateTemplateContext(activeTemplateContext, descriptor);
+                }
+
                 _nodes.Add(descriptor);
                 _nodesById[descriptor.Id] = descriptor;
 
@@ -234,6 +261,8 @@ namespace Avalonia.Diagnostics.Xaml
                     }
                 }
 
+                var setterMetadata = AnalyzeSetter(descriptor);
+
                 foreach (var attribute in descriptor.Attributes)
                 {
                     var binding = TryCreateBindingDescriptor(descriptor, attribute);
@@ -241,6 +270,17 @@ namespace Avalonia.Diagnostics.Xaml
                     {
                         _bindings.Add(binding);
                     }
+
+                    TryCollectTemplateBindingFromAttribute(descriptor, attribute, setterMetadata);
+                }
+
+                var templateContext = TryCreateTemplateContext(descriptor, parentDescriptor);
+
+                _nodeStack.Push(descriptor);
+
+                if (templateContext is not null)
+                {
+                    _templateContextStack.Push(templateContext);
                 }
 
                 var childIndex = 0;
@@ -250,6 +290,14 @@ namespace Avalonia.Diagnostics.Xaml
                     Visit(child.AsNode, path);
                     path.RemoveAt(path.Count - 1);
                 }
+
+                if (templateContext is not null)
+                {
+                    FinalizeTemplateContext(templateContext);
+                    _templateContextStack.Pop();
+                }
+
+                _nodeStack.Pop();
 
                 if (pushedScope && _scopeStack.Count > 0)
                 {
@@ -321,6 +369,340 @@ namespace Avalonia.Diagnostics.Xaml
                     basedOn,
                     resourceKey,
                     string.IsNullOrEmpty(resourceKey));
+            }
+
+            private SetterTemplateMetadata? AnalyzeSetter(XamlAstNodeDescriptor descriptor)
+            {
+                if (!string.Equals(descriptor.LocalName, "Setter", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                XamlAttributeDescriptor? propertyAttribute = null;
+                XamlAttributeDescriptor? valueAttribute = null;
+
+                foreach (var attribute in descriptor.Attributes)
+                {
+                    if (string.Equals(attribute.LocalName, "Property", StringComparison.Ordinal))
+                    {
+                        propertyAttribute = attribute;
+                    }
+                    else if (string.Equals(attribute.LocalName, "Value", StringComparison.Ordinal))
+                    {
+                        valueAttribute = attribute;
+                    }
+                }
+
+                if (propertyAttribute is null)
+                {
+                    return null;
+                }
+
+                var propertyAttr = propertyAttribute.Value;
+                var propertyInfo = ParseTemplateProperty(propertyAttr.Value);
+                if (propertyInfo is null || !IsTemplateProperty(propertyInfo.PropertyName))
+                {
+                    return null;
+                }
+
+                var metadata = new SetterTemplateMetadata(propertyInfo);
+                _setterTemplateMetadata[descriptor] = metadata;
+
+                if (valueAttribute is not null)
+                {
+                    var valueAttr = valueAttribute.Value;
+                    var templateSource = AnalyzeTemplateMarkup(valueAttr.Value);
+                    var binding = new XamlTemplateBindingDescriptor(
+                        descriptor,
+                        propertyInfo.RawProperty,
+                        propertyInfo.PropertyName,
+                        propertyInfo.DeclaringType,
+                        templateSource.kind,
+                        templateSource.value,
+                        null,
+                        null,
+                        null,
+                        valueAttr);
+                    _templateBindings.Add(binding);
+                }
+
+                return metadata;
+            }
+
+            private PropertyTemplateContext? TryCreateTemplateContext(
+                XamlAstNodeDescriptor descriptor,
+                XamlAstNodeDescriptor? parentDescriptor)
+            {
+                if (parentDescriptor is null)
+                {
+                    return null;
+                }
+
+                var propertyInfo = ParseTemplateProperty(descriptor.QualifiedName);
+                if (propertyInfo is not null && IsTemplateProperty(propertyInfo.PropertyName))
+                {
+                    return new PropertyTemplateContext(parentDescriptor, descriptor, propertyInfo);
+                }
+
+                if (string.Equals(descriptor.QualifiedName, "Setter.Value", StringComparison.Ordinal) &&
+                    _setterTemplateMetadata.TryGetValue(parentDescriptor, out var setterMetadata))
+                {
+                    return new PropertyTemplateContext(parentDescriptor, descriptor, setterMetadata.Property);
+                }
+
+                return null;
+            }
+
+            private bool TryGetActiveTemplateContext(
+                XamlAstNodeDescriptor propertyElement,
+                out PropertyTemplateContext context)
+            {
+                foreach (var candidate in _templateContextStack)
+                {
+                    if (ReferenceEquals(candidate.PropertyElement, propertyElement))
+                    {
+                        context = candidate;
+                        return true;
+                    }
+                }
+
+                context = null!;
+                return false;
+            }
+
+            private static bool IsTemplateDefinition(XamlAstNodeDescriptor descriptor)
+            {
+                if (!descriptor.IsTemplate)
+                {
+                    return false;
+                }
+
+                if (descriptor.LocalName.IndexOf('.') >= 0)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            private void UpdateTemplateContext(PropertyTemplateContext context, XamlAstNodeDescriptor descriptor)
+            {
+                if (context.SourceKind == XamlTemplateSourceKind.Inline && context.InlineTemplate is not null)
+                {
+                    return;
+                }
+
+                if (IsTemplateDefinition(descriptor))
+                {
+                    context.InlineTemplate ??= descriptor;
+                    context.SourceKind = XamlTemplateSourceKind.Inline;
+                    context.SourceValue = null;
+                    return;
+                }
+
+                if (context.SourceKind == XamlTemplateSourceKind.Inline)
+                {
+                    return;
+                }
+
+                if (TryGetResourceElementInfo(descriptor, out var resourceKind, out var resourceKey))
+                {
+                    context.SourceKind = resourceKind;
+                    context.SourceValue = resourceKey;
+                    context.ResourceDescriptor ??= descriptor;
+                }
+            }
+
+            private static bool TryGetResourceElementInfo(
+                XamlAstNodeDescriptor descriptor,
+                out XamlTemplateSourceKind kind,
+                out string? value)
+            {
+                if (string.Equals(descriptor.LocalName, "StaticResource", StringComparison.Ordinal))
+                {
+                    value = GetAttributeValue(descriptor, "ResourceKey") ??
+                            GetAttributeValue(descriptor, "Key");
+                    kind = XamlTemplateSourceKind.StaticResource;
+                    return true;
+                }
+
+                if (string.Equals(descriptor.LocalName, "DynamicResource", StringComparison.Ordinal))
+                {
+                    value = GetAttributeValue(descriptor, "ResourceKey") ??
+                            GetAttributeValue(descriptor, "Key");
+                    kind = XamlTemplateSourceKind.DynamicResource;
+                    return true;
+                }
+
+                if (string.Equals(descriptor.LocalName, "ThemeResource", StringComparison.Ordinal))
+                {
+                    value = GetAttributeValue(descriptor, "ResourceKey") ??
+                            GetAttributeValue(descriptor, "Key");
+                    kind = XamlTemplateSourceKind.ThemeResource;
+                    return true;
+                }
+
+                kind = XamlTemplateSourceKind.Unknown;
+                value = null;
+                return false;
+            }
+
+            private void FinalizeTemplateContext(PropertyTemplateContext context)
+            {
+                var sourceKind = context.SourceKind;
+                if (sourceKind == XamlTemplateSourceKind.Unknown && context.InlineTemplate is not null)
+                {
+                    sourceKind = XamlTemplateSourceKind.Inline;
+                }
+
+                var binding = new XamlTemplateBindingDescriptor(
+                    context.Owner,
+                    context.Property.RawProperty,
+                    context.Property.PropertyName,
+                    context.Property.DeclaringType,
+                    sourceKind,
+                    context.SourceValue,
+                    context.InlineTemplate,
+                    context.PropertyElement,
+                    context.ResourceDescriptor,
+                    null);
+
+                _templateBindings.Add(binding);
+            }
+
+            private void TryCollectTemplateBindingFromAttribute(
+                XamlAstNodeDescriptor owner,
+                XamlAttributeDescriptor attribute,
+                SetterTemplateMetadata? setterMetadata)
+            {
+                if (setterMetadata is not null && string.Equals(attribute.LocalName, "Value", StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                var propertyInfo = ParseTemplateProperty(attribute.FullName);
+                if (propertyInfo is null || !IsTemplateProperty(propertyInfo.PropertyName))
+                {
+                    return;
+                }
+
+                var templateSource = AnalyzeTemplateMarkup(attribute.Value);
+                var binding = new XamlTemplateBindingDescriptor(
+                    owner,
+                    propertyInfo.RawProperty,
+                    propertyInfo.PropertyName,
+                    propertyInfo.DeclaringType,
+                    templateSource.kind,
+                    templateSource.value,
+                    null,
+                    null,
+                    null,
+                    attribute);
+                _templateBindings.Add(binding);
+            }
+
+            private static TemplatePropertyInfo? ParseTemplateProperty(string? rawProperty)
+            {
+                var materialized = rawProperty?.Trim();
+                if (string.IsNullOrEmpty(materialized))
+                {
+                    return null;
+                }
+
+                var separatorIndex = materialized.LastIndexOf('.');
+                string propertyName;
+                string? declaringType = null;
+
+                if (separatorIndex >= 0 && separatorIndex < materialized.Length - 1)
+                {
+                    propertyName = materialized.Substring(separatorIndex + 1);
+                    declaringType = materialized.Substring(0, separatorIndex);
+                }
+                else
+                {
+                    propertyName = materialized;
+                }
+
+                return new TemplatePropertyInfo(materialized, propertyName, declaringType);
+            }
+
+            private static bool IsTemplateProperty(string? propertyName)
+            {
+                var candidate = propertyName;
+                if (string.IsNullOrEmpty(candidate))
+                {
+                    return false;
+                }
+
+                if (candidate.Equals("ItemsPanel", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                return candidate.EndsWith("Template", StringComparison.Ordinal);
+            }
+
+            private static string? GetAttributeValue(XamlAstNodeDescriptor descriptor, string name)
+            {
+                foreach (var attribute in descriptor.Attributes)
+                {
+                    if (string.Equals(attribute.LocalName, name, StringComparison.Ordinal))
+                    {
+                        return NormalizeAttribute(attribute.Value);
+                    }
+                }
+
+                return null;
+            }
+
+            private static (XamlTemplateSourceKind kind, string? value) AnalyzeTemplateMarkup(string? value)
+            {
+                var materialized = value?.Trim();
+                if (string.IsNullOrEmpty(materialized))
+                {
+                    return (XamlTemplateSourceKind.Unknown, null);
+                }
+
+                if (materialized[0] == '{' && materialized[materialized.Length - 1] == '}')
+                {
+                    var inner = materialized.Substring(1, materialized.Length - 2).Trim();
+                    if (inner.StartsWith("StaticResource", StringComparison.Ordinal))
+                    {
+                        var token = SliceToken(inner.Substring("StaticResource".Length));
+                        return (XamlTemplateSourceKind.StaticResource, token);
+                    }
+
+                    if (inner.StartsWith("DynamicResource", StringComparison.Ordinal))
+                    {
+                        var token = SliceToken(inner.Substring("DynamicResource".Length));
+                        return (XamlTemplateSourceKind.DynamicResource, token);
+                    }
+
+                    if (inner.StartsWith("ThemeResource", StringComparison.Ordinal))
+                    {
+                        var token = SliceToken(inner.Substring("ThemeResource".Length));
+                        return (XamlTemplateSourceKind.ThemeResource, token);
+                    }
+
+                    if (inner.StartsWith("TemplateBinding", StringComparison.Ordinal))
+                    {
+                        var token = SliceToken(inner.Substring("TemplateBinding".Length));
+                        return (XamlTemplateSourceKind.TemplateBinding, token);
+                    }
+                }
+                else if (materialized.StartsWith("avares://", StringComparison.OrdinalIgnoreCase) ||
+                         materialized.StartsWith("ms-appx://", StringComparison.OrdinalIgnoreCase) ||
+                         materialized.StartsWith("pack://", StringComparison.OrdinalIgnoreCase) ||
+                         Uri.IsWellFormedUriString(materialized, UriKind.Absolute))
+                {
+                    return (XamlTemplateSourceKind.Uri, materialized);
+                }
+                else if (materialized.StartsWith("resm:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (XamlTemplateSourceKind.CompiledResource, materialized);
+                }
+
+                return (XamlTemplateSourceKind.Unknown, materialized);
             }
 
             private static string? NormalizeAttribute(string value)
@@ -445,6 +827,60 @@ namespace Avalonia.Diagnostics.Xaml
 
                 var token = trimmed.Substring(0, end).Trim();
                 return token.Length == 0 ? null : token;
+            }
+
+            private sealed class PropertyTemplateContext
+            {
+                public PropertyTemplateContext(
+                    XamlAstNodeDescriptor owner,
+                    XamlAstNodeDescriptor propertyElement,
+                    TemplatePropertyInfo property)
+                {
+                    Owner = owner;
+                    PropertyElement = propertyElement;
+                    Property = property;
+                    SourceKind = XamlTemplateSourceKind.Unknown;
+                }
+
+                public XamlAstNodeDescriptor Owner { get; }
+
+                public XamlAstNodeDescriptor PropertyElement { get; }
+
+                public TemplatePropertyInfo Property { get; }
+
+                public XamlAstNodeDescriptor? InlineTemplate { get; set; }
+
+                public XamlAstNodeDescriptor? ResourceDescriptor { get; set; }
+
+                public XamlTemplateSourceKind SourceKind { get; set; }
+
+                public string? SourceValue { get; set; }
+            }
+
+            private sealed class SetterTemplateMetadata
+            {
+                public SetterTemplateMetadata(TemplatePropertyInfo property)
+                {
+                    Property = property;
+                }
+
+                public TemplatePropertyInfo Property { get; }
+            }
+
+            private sealed class TemplatePropertyInfo
+            {
+                public TemplatePropertyInfo(string rawProperty, string propertyName, string? declaringType)
+                {
+                    RawProperty = rawProperty;
+                    PropertyName = propertyName;
+                    DeclaringType = declaringType;
+                }
+
+                public string RawProperty { get; }
+
+                public string PropertyName { get; }
+
+                public string? DeclaringType { get; }
             }
 
             private sealed class ScopeFrame
@@ -742,5 +1178,70 @@ namespace Avalonia.Diagnostics.Xaml
         public string? ResourceKey { get; }
 
         public bool IsImplicit { get; }
+    }
+
+    public enum XamlTemplateSourceKind
+    {
+        Unknown,
+        Inline,
+        StaticResource,
+        DynamicResource,
+        ThemeResource,
+        TemplateBinding,
+        Uri,
+        CompiledResource
+    }
+
+    public sealed class XamlTemplateBindingDescriptor
+    {
+        public XamlTemplateBindingDescriptor(
+            XamlAstNodeDescriptor owner,
+            string rawProperty,
+            string propertyName,
+            string? declaringType,
+            XamlTemplateSourceKind sourceKind,
+            string? sourceValue,
+            XamlAstNodeDescriptor? inlineTemplate,
+            XamlAstNodeDescriptor? propertyElement,
+            XamlAstNodeDescriptor? resourceDescriptor,
+            XamlAttributeDescriptor? attribute)
+        {
+            Owner = owner ?? throw new ArgumentNullException(nameof(owner));
+            RawProperty = rawProperty ?? throw new ArgumentNullException(nameof(rawProperty));
+            PropertyName = propertyName ?? throw new ArgumentNullException(nameof(propertyName));
+            DeclaringType = declaringType;
+            SourceKind = sourceKind;
+            SourceValue = sourceValue;
+            InlineTemplate = inlineTemplate;
+            PropertyElement = propertyElement;
+            ResourceDescriptor = resourceDescriptor;
+            Attribute = attribute;
+        }
+
+        public XamlAstNodeDescriptor Owner { get; }
+
+        public string RawProperty { get; }
+
+        public string PropertyName { get; }
+
+        public string? DeclaringType { get; }
+
+        public XamlTemplateSourceKind SourceKind { get; }
+
+        public string? SourceValue { get; }
+
+        public XamlAstNodeDescriptor? InlineTemplate { get; }
+
+        public XamlAstNodeDescriptor? PropertyElement { get; }
+
+        public XamlAstNodeDescriptor? ResourceDescriptor { get; }
+
+        public XamlAttributeDescriptor? Attribute { get; }
+
+        public bool HasInlineTemplate => InlineTemplate is not null;
+
+        public bool HasAttribute => Attribute.HasValue;
+
+        public bool HasResourceReference => ResourceDescriptor is not null;
     }
 }

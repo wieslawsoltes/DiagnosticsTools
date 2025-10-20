@@ -1,0 +1,65 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="using:DiagnosticsToolsSample.Controls"
+             mc:Ignorable="d"
+             x:Class="DiagnosticsToolsSample.Controls.SampleUserControl" ClipToBounds="True">
+    <UserControl.Styles>
+        <Style Selector="Border.highlight">
+            <Setter Property="Background" Value="#FFF0FDFF"/>
+            <Setter Property="BorderBrush" Value="#FF0891B2"/>
+            <Setter Property="BoxShadow" Value="0 4 16 #220089A7"/>
+        </Style>
+    </UserControl.Styles>
+
+    <Border x:Name="LayoutRoot"
+            Margin="0,0,0,12"
+            Padding="16"
+            Background="#FFFFFFFF"
+            BorderBrush="#FFD1D5DB"
+            BorderThickness="1"
+            CornerRadius="10"
+            BoxShadow="0 2 6 #24000000"    ClipToBounds="True">
+        <StackPanel Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                           FontSize="20"
+                           FontWeight="SemiBold"/>
+                <local:Badge Text="{Binding BadgeText, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                             Classes="outline"
+                             IsVisible="{Binding ShowBadge, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"/>
+            </StackPanel>
+
+            <TextBlock Text="{Binding Description, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                       TextWrapping="Wrap"
+                       Foreground="#FF1F2937"/>
+
+            <Border Background="#FFF8FAFC"
+                    BorderBrush="#FFCBD5E1"
+                    BorderThickness="1"
+                    Padding="10"
+                    CornerRadius="6"
+                    IsVisible="{Binding ShowDetailsPanel, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Details"
+                               FontWeight="SemiBold"
+                               Foreground="#FF334155"/>
+                    <TextBlock Text="{Binding Details, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                               TextWrapping="Wrap"
+                               Foreground="#FF475569"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="{Binding Footer, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                       FontStyle="Italic"
+                       Foreground="#FF64748B"
+                       IsVisible="{Binding ShowFooter, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"/>
+
+            <Button Content="{Binding ActionLabel, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"
+                    HorizontalAlignment="Left"
+                    Classes="pillTheme"
+                    IsVisible="{Binding ShowAction, RelativeSource={RelativeSource AncestorType=local:SampleUserControl}}"/>
+        </StackPanel>
+    </Border>
+</UserControl>

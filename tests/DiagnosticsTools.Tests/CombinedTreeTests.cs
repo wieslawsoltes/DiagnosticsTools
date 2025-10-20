@@ -87,7 +87,7 @@ namespace DiagnosticsTools.Tests
             var pinned = new HashSet<string>();
             using var workspace = new XamlAstWorkspace();
             var coordinator = new SelectionCoordinator();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree.Combined");
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree.Combined");
 
             var root = Assert.IsType<CombinedTreeNode>(combinedTree.Nodes.Single());
             var templateGroup = Assert.Single(root.Children.OfType<CombinedTreeTemplateGroupNode>());
@@ -113,7 +113,7 @@ namespace DiagnosticsTools.Tests
             var pinned = new HashSet<string>();
             using var workspace = new XamlAstWorkspace();
             var coordinator = new SelectionCoordinator();
-            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), coordinator, "Test.Tree.Combined");
+            var combinedTree = CombinedTreePageViewModel.FromRoot(mainViewModel, control, pinned, sourceInfoService, sourceNavigator, workspace, new RuntimeMutationCoordinator(), null, null, coordinator, "Test.Tree.Combined");
 
             combinedTree.TreeFilter.FilterString = "Border";
 
@@ -168,6 +168,8 @@ namespace DiagnosticsTools.Tests
                     navigator,
                     workspace,
                     new RuntimeMutationCoordinator(),
+                    null,
+                    null,
                     coordinator,
                     "Test.Tree.Combined");
 

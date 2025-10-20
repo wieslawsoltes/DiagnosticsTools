@@ -2,97 +2,213 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="using:DiagnosticsToolsSample.Controls"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="DiagnosticsToolsSample.MainWindow"
         Width="800" Height="600" 
         WindowStartupLocation="CenterScreen"
         Title="DiagnosticsToolsSample">
-<Grid>
-    <StackPanel Margin="10,10,-10,0" HorizontalAlignment="Center" VerticalAlignment="Center">
-      <StackPanel Orientation="Horizontal">
-        <StackPanel>
-          <TextBlock Text="Default Button" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <Button Content="Enabled"/>
-          <Button Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel Margin="20,0">
-          <TextBlock Text="Toggle Button" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <ToggleButton Content="Enabled"/>
-          <ToggleButton Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
-          <ToggleButton Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-          <ToggleButton Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel>
-          <TextBlock Text="Toggle Switch" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <ToggleSwitch Content="Enabled"/>
-          <ToggleSwitch Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
-          <ToggleSwitch Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-          <ToggleSwitch Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel Margin="20,0">
-          <TextBlock Text="CheckBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <CheckBox Content="Enabled"/>
-          <CheckBox Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
-          <CheckBox Content="3-State" IsChecked="{x:Null}" IsThreeState="True" Margin="0,5,0,0"/>
-          <CheckBox Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-          <CheckBox Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
-          <CheckBox Content="3-State" IsChecked="{x:Null}" IsThreeState="True" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel Margin="20,0">
-          <TextBlock Text="RadioButton" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <StackPanel>
-            <RadioButton Content="Enabled"/>
-            <RadioButton Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
-          </StackPanel>
-          <StackPanel>
-            <RadioButton Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-            <RadioButton Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
-          </StackPanel>
-        </StackPanel>
-      </StackPanel>
-      <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-        <StackPanel>
-          <TextBlock Text="TextBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <TextBox Text="Enabled"/>
-          <TextBox Watermark="Placeholder" Margin="0,5,0,0"/>
-          <TextBox Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel Margin="20,0">
-          <TextBlock Text="PasswordBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <TextBox PasswordChar="*" Text="Enabled"/>
-          <TextBox PasswordChar="*" Watermark="Placeholder" Margin="0,5,0,0"/>
-          <TextBox PasswordChar="*" Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel>
-          <TextBlock Text="Slider" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <Slider Value="0" MinWidth="120"/>
-          <Slider Value="1" TickPlacement="Outside" Margin="0,5,0,0"/>
-          <Slider Value="2" IsDirectionReversed="True" TickPlacement="BottomRight" Margin="0,5,0,0"/>
-          <Slider Value="5" IsEnabled="False" Margin="0,5,0,0"/>
-        </StackPanel>
-        <StackPanel Margin="20,0">
-          <TextBlock Text="ListBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <ListBox BorderThickness="1">
-            <ListBoxItem Content="Unselected"/>
-            <ListBoxItem Content="Selected"/>
-            <ListBoxItem Content="Disabled" IsEnabled="False"/>
-          </ListBox>
-        </StackPanel>
-        <StackPanel>
-          <TextBlock Text="TreeView" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
-          <TreeView BorderThickness="1">
-            <TreeViewItem Header="Expanded" IsExpanded="True">
-              <TreeViewItem Header="Child"/>
-            </TreeViewItem>
-            <TreeViewItem Header="Collapsed">
-              <TreeViewItem Header="Child"/>
-            </TreeViewItem>
-            <TreeViewItem Header="Disabled" IsEnabled="False">
-              <TreeViewItem Header="Child"/>
-            </TreeViewItem>
-          </TreeView>
-        </StackPanel>
-      </StackPanel>
-    </StackPanel>
-  </Grid>
+    <TabControl Margin="12">
+        <TabItem Header="Control Catalog">
+            <Grid>
+                <StackPanel Margin="10,10,-10,0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <StackPanel>
+                            <TextBlock Text="Default Button" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <Button Content="Enabled"/>
+                            <Button Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Margin="20,0">
+                            <TextBlock Text="Toggle Button" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <ToggleButton Content="Enabled"/>
+                            <ToggleButton Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
+                            <ToggleButton Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                            <ToggleButton Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Toggle Switch" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <ToggleSwitch Content="Enabled"/>
+                            <ToggleSwitch Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
+                            <ToggleSwitch Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                            <ToggleSwitch Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Margin="20,0">
+                            <TextBlock Text="CheckBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <CheckBox Content="Enabled"/>
+                            <CheckBox Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
+                            <CheckBox Content="3-State" IsChecked="{x:Null}" IsThreeState="True" Margin="0,5,0,0"/>
+                            <CheckBox Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                            <CheckBox Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
+                            <CheckBox Content="3-State" IsChecked="{x:Null}" IsThreeState="True" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Margin="20,0">
+                            <TextBlock Text="RadioButton" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <StackPanel>
+                                <RadioButton Content="Enabled"/>
+                                <RadioButton Content="Checked" IsChecked="True" Margin="0,5,0,0"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <RadioButton Content="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                                <RadioButton Content="Checked" IsChecked="True" IsEnabled="False" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                        <StackPanel>
+                            <TextBlock Text="TextBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <TextBox Text="Enabled"/>
+                            <TextBox Watermark="Placeholder" Margin="0,5,0,0"/>
+                            <TextBox Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Margin="20,0">
+                            <TextBlock Text="PasswordBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <TextBox PasswordChar="*" Text="Enabled"/>
+                            <TextBox PasswordChar="*" Watermark="Placeholder" Margin="0,5,0,0"/>
+                            <TextBox PasswordChar="*" Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Slider" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <Slider Value="0" MinWidth="120"/>
+                            <Slider Value="1" TickPlacement="Outside" Margin="0,5,0,0"/>
+                            <Slider Value="2" IsDirectionReversed="True" TickPlacement="BottomRight" Margin="0,5,0,0"/>
+                            <Slider Value="5" IsEnabled="False" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Margin="20,0">
+                            <TextBlock Text="ListBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <ListBox BorderThickness="1">
+                                <ListBoxItem Content="Unselected"/>
+                                <ListBoxItem Content="Selected"/>
+                                <ListBoxItem Content="Disabled" IsEnabled="False"/>
+                            </ListBox>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="TreeView" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
+                            <TreeView BorderThickness="1">
+                                <TreeViewItem Header="Expanded" IsExpanded="True">
+                                    <TreeViewItem Header="Child"/>
+                                </TreeViewItem>
+                                <TreeViewItem Header="Collapsed">
+                                    <TreeViewItem Header="Child"/>
+                                </TreeViewItem>
+                                <TreeViewItem Header="Disabled" IsEnabled="False">
+                                    <TreeViewItem Header="Child"/>
+                                </TreeViewItem>
+                            </TreeView>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </TabItem>
+
+        <TabItem Header="User Controls">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="8" Spacing="16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Sample User Control Variations"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="Reusable card-style summaries that surface diagnostics data."
+                                   Foreground="#FF475569"/>
+                    </StackPanel>
+
+                    <controls:SampleUserControl Title="Live Diagnostics Dashboard"
+                                                Description="Shows runtime property updates and visual tree changes in real-time."
+                                                Details="Includes property editing, undo/redo tracking, and mutation previews."
+                                                Footer="Best suited for iterative UI tweaking during prototyping."
+                                                ShowFooter="True"
+                                                ShowDetailsPanel="True"
+                                                BadgeText="Preview"
+                                                ShowBadge="True"
+                                                ActionLabel="Open Panel"
+                                                ShowAction="True"
+                                                IsHighlighted="True"/>
+
+                    <controls:SampleUserControl Title="Telemetry Stream"
+                                                Description="Aggregates mutation telemetry and reports guard failures for later analysis."
+                                                Details="Filters by inspector gesture and throttles updates for long sessions."
+                                                Footer="Telemetry export is available as NDJSON."
+                                                ShowFooter="True"
+                                                ShowDetailsPanel="True"
+                                                BadgeText="Beta"
+                                                ShowBadge="True"
+                                                ActionLabel="View Stream"
+                                                ShowAction="True"
+                                                IsHighlighted="False"/>
+
+                    <controls:SampleUserControl Title="Snapshot Reviewer"
+                                                Description="Compares before/after XAML snapshots with inline diff visualization."
+                                                Details="Useful for code reviews and for validating automated refactors."
+                                                Footer="Supports sharing review links with teammates."
+                                                ShowFooter="True"
+                                                ShowDetailsPanel="False"
+                                                BadgeText="Stable"
+                                                ShowBadge="False"
+                                                ActionLabel="Launch"
+                                                ShowAction="True"
+                                                IsHighlighted="False"/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Custom Themes">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="8" Spacing="20">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Custom Control Themes"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="Examples of bespoke templated controls alongside themed built-in controls."
+                                   Foreground="#FF475569"/>
+                    </StackPanel>
+
+                    <Border Padding="16" BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Badges" FontSize="18" FontWeight="SemiBold"/>
+                            <WrapPanel>
+                                <controls:Badge Text="Info" Classes="info" Margin="0,0,8,8"/>
+                                <controls:Badge Text="Success" Classes="success" Margin="0,0,8,8"/>
+                                <controls:Badge Text="Warning" Classes="warning" Margin="0,0,8,8"/>
+                                <controls:Badge Text="Neutral" Classes="outline" Margin="0,0,8,8"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="16" BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Re-themed Buttons" FontSize="18" FontWeight="SemiBold"/>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Content="Primary Action" Classes="pillTheme"/>
+                                <Button Content="Disabled Action" Classes="pillTheme" IsEnabled="False"/>
+                                <Button Classes="pillTheme">
+                                    <Button.Content>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Path Data="M4 2 L10 8 L4 14"
+                                                  Width="12"
+                                                  Height="12"
+                                                  Stroke="White"
+                                                  StrokeThickness="2"
+                                                  StrokeLineCap="Round"
+                                                  Stretch="Uniform"/>
+                                            <TextBlock Text="Navigate"/>
+                                        </StackPanel>
+                                    </Button.Content>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="16" BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Segmented Toggles" FontSize="18" FontWeight="SemiBold"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <ToggleButton Content="Live" Classes="segment" IsChecked="True"/>
+                                <ToggleButton Content="Recording" Classes="segment"/>
+                                <ToggleButton Content="Paused" Classes="segment"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+    </TabControl>
 </Window>

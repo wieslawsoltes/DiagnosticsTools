@@ -1128,6 +1128,16 @@ public class XamlMutationDispatcherTests : IDisposable
             LastEnvelope = envelope;
             return ValueTask.FromResult(ChangeDispatchResult.Success());
         }
+
+        public ValueTask<ChangeDispatchResult> DispatchAsync(ChangeBatch batch, System.Threading.CancellationToken cancellationToken = default)
+        {
+            if (batch.Documents is { Count: > 0 })
+            {
+                LastEnvelope = batch.Documents[batch.Documents.Count - 1];
+            }
+
+            return ValueTask.FromResult(ChangeDispatchResult.Success());
+        }
     }
 
     public void Dispose()

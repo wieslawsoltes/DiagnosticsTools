@@ -45,6 +45,8 @@ namespace DiagnosticsTools.Tests
                 navigator,
                 workspace,
                 new RuntimeMutationCoordinator(),
+                null,
+                null,
                 coordinator,
                 "Test.Tree");
 
@@ -93,6 +95,8 @@ namespace DiagnosticsTools.Tests
                 navigator,
                 workspace,
                 new RuntimeMutationCoordinator(),
+                null,
+                null,
                 coordinator,
                 "Test.Tree");
 
@@ -139,6 +143,8 @@ namespace DiagnosticsTools.Tests
                 navigator,
                 workspace,
                 new RuntimeMutationCoordinator(),
+                null,
+                null,
                 coordinator,
                 "Test.Tree");
 

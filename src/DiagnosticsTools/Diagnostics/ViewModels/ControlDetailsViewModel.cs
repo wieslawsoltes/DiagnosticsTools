@@ -14,6 +14,7 @@ using Avalonia.Controls.Metadata;
 using Avalonia.Data;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.Runtime;
+using Avalonia.Diagnostics.Services;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Views;
 using Avalonia.Markup.Xaml.MarkupExtensions;
@@ -61,11 +62,15 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly DelegateCommand _undoMutationCommand;
         private readonly DelegateCommand _redoMutationCommand;
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
+        private readonly ITemplateSourceResolver? _templateSourceResolver;
+        private readonly ITemplateOverrideService? _templateOverrideService;
         private readonly DelegateCommand _reloadExternalDocumentCommand;
         private readonly DelegateCommand _dismissExternalDocumentChangeCommand;
         private string? _mutationStatusMessage;
         private bool _hasExternalDocumentChanges;
         private ExternalDocumentChangedEventArgs? _externalDocumentChange;
+        private string? _undoMutationDescription;
+        private string? _redoMutationDescription;
 
         public ControlDetailsViewModel(
             TreePageViewModel treePage,
@@ -73,7 +78,9 @@ namespace Avalonia.Diagnostics.ViewModels
             ISet<string> pinnedProperties,
             ISourceInfoService sourceInfoService,
             ISourceNavigator sourceNavigator,
-            RuntimeMutationCoordinator runtimeCoordinator)
+            RuntimeMutationCoordinator runtimeCoordinator,
+            ITemplateSourceResolver? templateSourceResolver,
+            ITemplateOverrideService? templateOverrideService)
         {
             _avaloniaObject = avaloniaObject;
             _pinnedProperties = pinnedProperties;
@@ -86,6 +93,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _changeEmitter = null;
             _mutationDispatcher = null;
             _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
+            _templateSourceResolver = templateSourceResolver;
+            _templateOverrideService = templateOverrideService;
             _undoMutationCommand = new DelegateCommand(UndoMutationAsync, () => CanUndoMutation);
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
             _reloadExternalDocumentCommand = new DelegateCommand(ReloadExternalDocumentAsync, () => HasExternalDocumentChanges);
@@ -116,7 +125,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 foreach (var appliedStyle in styleDiagnostics.AppliedFrames.OrderBy(s => s.Priority))
                 {
-                    var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView);
+                    var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView, _templateSourceResolver, _templateOverrideService);
                     frame.SourcePreviewRequested += OnValueFramePreviewRequested;
                     AppliedFrames.Add(frame);
                 }
@@ -192,6 +201,18 @@ namespace Avalonia.Diagnostics.ViewModels
         public bool CanRedoMutation => _mutationDispatcher?.CanRedo ?? false;
 
         public bool ShowMutationCommands => _mutationDispatcher is not null;
+
+        public string? UndoMutationDescription
+        {
+            get => _undoMutationDescription;
+            private set => RaiseAndSetIfChanged(ref _undoMutationDescription, value);
+        }
+
+        public string? RedoMutationDescription
+        {
+            get => _redoMutationDescription;
+            private set => RaiseAndSetIfChanged(ref _redoMutationDescription, value);
+        }
 
         public string? MutationStatusMessage
         {
@@ -610,6 +631,61 @@ namespace Avalonia.Diagnostics.ViewModels
             RaisePropertyChanged(nameof(CanUndoMutation));
             RaisePropertyChanged(nameof(CanRedoMutation));
             RaisePropertyChanged(nameof(ShowMutationCommands));
+            UpdateMutationSummaries();
+        }
+
+        private void UpdateMutationSummaries()
+        {
+            if (_mutationDispatcher is null)
+            {
+                UndoMutationDescription = null;
+                RedoMutationDescription = null;
+                return;
+            }
+
+            if (_mutationDispatcher.TryPeekUndo(out var undoEntry))
+            {
+                UndoMutationDescription = BuildMutationSummary("Undo", undoEntry);
+            }
+            else
+            {
+                UndoMutationDescription = null;
+            }
+
+            if (_mutationDispatcher.TryPeekRedo(out var redoEntry))
+            {
+                RedoMutationDescription = BuildMutationSummary("Redo", redoEntry);
+            }
+            else
+            {
+                RedoMutationDescription = null;
+            }
+        }
+
+        private static string BuildMutationSummary(string prefix, in MutationEntry entry)
+        {
+            if (entry.Documents is not { Count: > 0 })
+            {
+                return $"{prefix} last change";
+            }
+
+            var documents = entry.Documents;
+            var documentNames = documents
+                .Select(d => !string.IsNullOrWhiteSpace(d.Path)
+                    ? Path.GetFileName(d.Path)
+                    : (d.Envelope?.Document.Path is { Length: > 0 } path ? Path.GetFileName(path) : "Document"))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var count = documents.Count;
+            var summary = string.Join(", ", documentNames.Take(3));
+            if (documentNames.Length > 3)
+            {
+                summary += ", …";
+            }
+
+            return $"{prefix} ({count} file{(count == 1 ? string.Empty : "s")}): {summary}";
         }
 
         private IEnumerable<PropertyViewModel> GetAvaloniaProperties(object o)
@@ -684,9 +760,16 @@ namespace Avalonia.Diagnostics.ViewModels
                 return;
             }
 
-            var context = CreatePropertyChangeContext(viewModel.Property);
-            if (context is null)
+            var previous = viewModel.PreviousValue;
+            if (!TryCreatePropertyChangeContext(viewModel.Property, out var context, out var contextError))
             {
+                if (!string.IsNullOrEmpty(contextError))
+                {
+                    MutationStatusMessage = contextError;
+                    ApplyRuntimeValue(_avaloniaObject, viewModel.Property, previous);
+                    viewModel.Update();
+                    viewModel.RefreshPreviousValueBaseline();
+                }
                 return;
             }
 
@@ -696,7 +779,6 @@ namespace Avalonia.Diagnostics.ViewModels
 
             var gesture = DetermineGesture(viewModel.Property, newValue);
             var command = DetermineEditorCommand(viewModel, newValue);
-            var previous = viewModel.PreviousValue;
 
             MutationStatusMessage = null;
 
@@ -780,21 +862,42 @@ namespace Avalonia.Diagnostics.ViewModels
             await RevertPropertyAsync(context, viewModel, previous).ConfigureAwait(false);
         }
 
-        private PropertyChangeContext? CreatePropertyChangeContext(AvaloniaProperty property)
+        private bool TryCreatePropertyChangeContext(
+            AvaloniaProperty property,
+            out PropertyChangeContext? context,
+            out string? errorMessage)
         {
+            errorMessage = null;
+
+            foreach (var frame in AppliedFrames)
+            {
+                if (frame.TryCreateTemplateMutationContext(property, out var templateContext, out var templateError))
+                {
+                    if (!string.IsNullOrEmpty(templateError))
+                    {
+                        errorMessage = templateError;
+                    }
+
+                    context = templateContext;
+                    return templateContext is not null;
+                }
+            }
+
             var selection = TreePage.SelectedNodeXaml;
             if (selection is null || selection.Node is null)
             {
-                return null;
+                context = null;
+                return false;
             }
 
-            return new PropertyChangeContext(
+            context = new PropertyChangeContext(
                 _avaloniaObject,
                 property,
                 selection.Document,
                 selection.Node,
                 frame: "LocalValue",
                 valueSource: "LocalValue");
+            return true;
         }
 
         private static void ApplyRuntimeValue(AvaloniaObject target, AvaloniaProperty property, object? value)
@@ -1119,7 +1222,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             foreach (var appliedStyle in diagnostics.AppliedFrames.OrderBy(s => s.Priority))
             {
-                var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView);
+                var frame = new ValueFrameViewModel(styledElement, appliedStyle, clipboard, _sourceInfoService, _sourceNavigator, TreePage.MainView, _templateSourceResolver, _templateOverrideService);
                 frame.SourcePreviewRequested += OnValueFramePreviewRequested;
                 AppliedFrames.Add(frame);
             }

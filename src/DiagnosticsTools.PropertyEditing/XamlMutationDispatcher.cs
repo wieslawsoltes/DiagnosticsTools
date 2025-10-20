@@ -24,6 +24,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 ? StringComparison.OrdinalIgnoreCase
                 : StringComparison.Ordinal;
 
+        private sealed record class PreparedMutation(
+            ChangeEnvelope Envelope,
+            string Path,
+            XamlAstDocument Document,
+            MutableXamlDocument MutatedDocument,
+            string UpdatedText,
+            bool Mutated);
+
         public XamlAstWorkspace Workspace => _workspace;
 
         public XamlMutationDispatcher(XamlAstWorkspace workspace, Workspace? roslynWorkspace = null)
@@ -39,6 +47,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         public bool CanRedo => _journal.CanRedo;
 
+        public bool TryPeekUndo(out MutationEntry entry) => _journal.TryPeekUndo(out entry);
+
+        public bool TryPeekRedo(out MutationEntry entry) => _journal.TryPeekRedo(out entry);
+
         public async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken = default)
         {
             if (envelope is null)
@@ -46,46 +58,89 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 throw new ArgumentNullException(nameof(envelope));
             }
 
-            if (string.IsNullOrWhiteSpace(envelope.Document.Path))
+            var (prepareResult, prepared) = await PrepareMutationAsync(envelope, cancellationToken).ConfigureAwait(false);
+            if (prepared is null)
             {
-                var failure = ChangeDispatchResult.MutationFailure(null, "Document path is missing.");
-                OnMutationCompleted(envelope, failure);
-                return failure;
+                OnMutationCompleted(envelope, prepareResult);
+                return prepareResult;
             }
 
-            var path = envelope.Document.Path;
-            XamlAstDocument document;
-            IXamlAstIndex index;
-
-            try
+            if (!prepared.Mutated)
             {
-                document = await _workspace.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
-                index = await _workspace.GetIndexAsync(path, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                var failure = ChangeDispatchResult.MutationFailure(null, $"Failed to load XAML document: {ex.Message}");
-                OnMutationCompleted(envelope, failure);
-                return failure;
+                var success = ChangeDispatchResult.Success();
+                OnMutationCompleted(envelope, success);
+                return success;
             }
 
-            var currentVersion = document.Version.ToString();
-            if (!string.Equals(currentVersion, envelope.Document.Version, StringComparison.Ordinal))
+            var (commitResult, documentMutation) = await CommitPreparedMutationAsync(prepared, cancellationToken).ConfigureAwait(false);
+            if (commitResult.Status == ChangeDispatchStatus.Success && documentMutation is not null)
             {
-                var versionFailure = ChangeDispatchResult.GuardFailure(null, "Document version mismatch.");
-                OnMutationCompleted(envelope, versionFailure);
-                return versionFailure;
+                _journal.Record(new MutationEntry(new[] { documentMutation.Value }));
             }
 
-            var result = await TryDispatchWithMutablePipelineAsync(
-                path,
-                envelope,
-                document,
-                index,
-                cancellationToken).ConfigureAwait(false);
+            OnMutationCompleted(envelope, commitResult);
+            return commitResult;
+        }
 
-            OnMutationCompleted(envelope, result);
-            return result;
+        public async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeBatch batch, CancellationToken cancellationToken = default)
+        {
+            if (batch is null)
+            {
+                throw new ArgumentNullException(nameof(batch));
+            }
+
+            if (batch.Documents is null || batch.Documents.Count == 0)
+            {
+                return ChangeDispatchResult.Success();
+            }
+
+            var preparedMutations = new List<PreparedMutation>(batch.Documents.Count);
+
+            foreach (var envelope in batch.Documents)
+            {
+                var (prepareResult, prepared) = await PrepareMutationAsync(envelope, cancellationToken).ConfigureAwait(false);
+                if (prepared is null)
+                {
+                    OnMutationCompleted(envelope, prepareResult);
+                    return prepareResult;
+                }
+
+                preparedMutations.Add(prepared);
+            }
+
+            var committedMutations = new List<DocumentMutation>();
+
+            foreach (var prepared in preparedMutations)
+            {
+                if (!prepared.Mutated)
+                {
+                    var success = ChangeDispatchResult.Success();
+                    OnMutationCompleted(prepared.Envelope, success);
+                    continue;
+                }
+
+                var (commitResult, documentMutation) = await CommitPreparedMutationAsync(prepared, cancellationToken).ConfigureAwait(false);
+                if (commitResult.Status != ChangeDispatchStatus.Success)
+                {
+                    await RollbackCommittedMutationsAsync(committedMutations, cancellationToken).ConfigureAwait(false);
+                    OnMutationCompleted(prepared.Envelope, commitResult);
+                    return commitResult;
+                }
+
+                if (documentMutation is not null)
+                {
+                    committedMutations.Add(documentMutation.Value);
+                }
+
+                OnMutationCompleted(prepared.Envelope, commitResult);
+            }
+
+            if (committedMutations.Count > 0)
+            {
+                _journal.Record(new MutationEntry(committedMutations.ToArray()));
+            }
+
+            return ChangeDispatchResult.Success();
         }
 
         public async ValueTask<ChangeDispatchResult> UndoAsync(CancellationToken cancellationToken = default)
@@ -95,7 +150,22 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return ChangeDispatchResult.MutationFailure(null, "No mutations to undo.");
             }
 
-            var result = await RestoreSnapshotAsync(entry.Path, entry.Before, cancellationToken).ConfigureAwait(false);
+            var documents = entry.Documents;
+            var result = ChangeDispatchResult.Success();
+
+            if (documents is not null)
+            {
+                foreach (var document in documents)
+                {
+                    var restoreResult = await RestoreSnapshotAsync(document.Path, document.Before, cancellationToken).ConfigureAwait(false);
+                    if (restoreResult.Status != ChangeDispatchStatus.Success)
+                    {
+                        result = restoreResult;
+                        break;
+                    }
+                }
+            }
+
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushRedo(entry);
@@ -105,7 +175,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 _journal.PushUndo(entry);
             }
 
-            OnMutationCompleted(entry.Envelope, result);
+            if (documents is not null)
+            {
+                foreach (var document in documents)
+                {
+                    OnMutationCompleted(document.Envelope, result);
+                }
+            }
+
             return result;
         }
 
@@ -116,7 +193,22 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 return ChangeDispatchResult.MutationFailure(null, "No mutations to redo.");
             }
 
-            var result = await RestoreSnapshotAsync(entry.Path, entry.After, cancellationToken).ConfigureAwait(false);
+            var documents = entry.Documents;
+            var result = ChangeDispatchResult.Success();
+
+            if (documents is not null)
+            {
+                foreach (var document in documents)
+                {
+                    var restoreResult = await RestoreSnapshotAsync(document.Path, document.After, cancellationToken).ConfigureAwait(false);
+                    if (restoreResult.Status != ChangeDispatchStatus.Success)
+                    {
+                        result = restoreResult;
+                        break;
+                    }
+                }
+            }
+
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushUndo(entry);
@@ -126,7 +218,14 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 _journal.PushRedo(entry);
             }
 
-            OnMutationCompleted(entry.Envelope, result);
+            if (documents is not null)
+            {
+                foreach (var document in documents)
+                {
+                    OnMutationCompleted(document.Envelope, result);
+                }
+            }
+
             return result;
         }
 
@@ -369,15 +468,40 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return builder.ToString();
         }
 
-        private async ValueTask<ChangeDispatchResult> TryDispatchWithMutablePipelineAsync(
-            string path,
+        private async ValueTask<(ChangeDispatchResult Result, PreparedMutation? Mutation)> PrepareMutationAsync(
             ChangeEnvelope envelope,
-            XamlAstDocument document,
-            IXamlAstIndex index,
             CancellationToken cancellationToken)
         {
-            MutableXamlDocument mutableDocument;
+            if (string.IsNullOrWhiteSpace(envelope.Document.Path))
+            {
+                return (ChangeDispatchResult.MutationFailure(null, "Document path is missing."), null);
+            }
 
+            var path = envelope.Document.Path;
+            XamlAstDocument document;
+            IXamlAstIndex index;
+
+            try
+            {
+                document = await _workspace.GetDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+                index = await _workspace.GetIndexAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return (ChangeDispatchResult.MutationFailure(null, $"Failed to load XAML document: {ex.Message}"), null);
+            }
+
+            var currentVersion = document.Version.ToString();
+            if (!string.Equals(currentVersion, envelope.Document.Version, StringComparison.Ordinal))
+            {
+                return (ChangeDispatchResult.GuardFailure(null, "Document version mismatch."), null);
+            }
+
+            MutableXamlDocument mutableDocument;
             try
             {
                 mutableDocument = await _workspace.GetMutableDocumentAsync(path, cancellationToken).ConfigureAwait(false);
@@ -388,42 +512,51 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
             catch
             {
-                return ChangeDispatchResult.MutationFailure(null, "Failed to load mutable XAML document.");
+                return (ChangeDispatchResult.MutationFailure(null, "Failed to load mutable XAML document."), null);
             }
 
             var applicationResult = MutableXamlMutationApplier.TryApply(document, index, mutableDocument, envelope.Changes);
-
             if (applicationResult.Status == MutableMutationStatus.Failed)
             {
-                return applicationResult.Failure ?? ChangeDispatchResult.MutationFailure(null, "Mutable pipeline failed to apply change.");
+                return (applicationResult.Failure ?? ChangeDispatchResult.MutationFailure(null, "Mutable pipeline failed to apply change."), null);
             }
 
             if (applicationResult.Status == MutableMutationStatus.Unsupported)
             {
-                return ChangeDispatchResult.MutationFailure(null, "Mutable pipeline does not support this change type.");
-            }
-
-            if (!applicationResult.Mutated)
-            {
-                return ChangeDispatchResult.Success();
+                return (ChangeDispatchResult.MutationFailure(null, "Mutable pipeline does not support this change type."), null);
             }
 
             var mutatedDocument = applicationResult.Document ?? mutableDocument;
-            var updatedText = MutableXamlSerializer.Serialize(mutatedDocument);
+            var updatedText = applicationResult.Mutated
+                ? MutableXamlSerializer.Serialize(mutatedDocument)
+                : document.Text;
+
+            var prepared = new PreparedMutation(envelope, path, document, mutatedDocument, updatedText, applicationResult.Mutated);
+            return (ChangeDispatchResult.Success(), prepared);
+        }
+
+        private async ValueTask<(ChangeDispatchResult Result, DocumentMutation? Mutation)> CommitPreparedMutationAsync(
+            PreparedMutation prepared,
+            CancellationToken cancellationToken)
+        {
+            if (!prepared.Mutated)
+            {
+                return (ChangeDispatchResult.Success(), null);
+            }
 
             if (_roslynWorkspace is not null)
             {
-                var (handled, workspaceResult) = await TryPersistWithWorkspaceAsync(path, updatedText, cancellationToken).ConfigureAwait(false);
+                var (handled, workspaceResult) = await TryPersistWithWorkspaceAsync(prepared.Path, prepared.UpdatedText, cancellationToken).ConfigureAwait(false);
                 if (handled && workspaceResult.Status != ChangeDispatchStatus.Success)
                 {
-                    return workspaceResult;
+                    return (workspaceResult, null);
                 }
             }
 
             XamlAstDocument committedDocument;
             try
             {
-                committedDocument = await _workspace.CommitMutableDocumentAsync(path, mutatedDocument, cancellationToken).ConfigureAwait(false);
+                committedDocument = await _workspace.CommitMutableDocumentAsync(prepared.Path, prepared.MutatedDocument, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -431,11 +564,27 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
             catch (Exception ex)
             {
-                return ChangeDispatchResult.MutationFailure(null, $"Failed to persist mutable XAML document: {ex.Message}");
+                return (ChangeDispatchResult.MutationFailure(null, $"Failed to persist mutable XAML document: {ex.Message}"), null);
             }
 
-            _journal.Record(new MutationEntry(path, document.Text, committedDocument.Text, envelope));
-            return ChangeDispatchResult.Success();
+            var mutation = new DocumentMutation(prepared.Envelope, prepared.Path, prepared.Document.Text, committedDocument.Text);
+            return (ChangeDispatchResult.Success(), mutation);
+        }
+
+        private async Task RollbackCommittedMutationsAsync(
+            IReadOnlyList<DocumentMutation> mutations,
+            CancellationToken cancellationToken)
+        {
+            if (mutations is null || mutations.Count == 0)
+            {
+                return;
+            }
+
+            for (var index = mutations.Count - 1; index >= 0; index--)
+            {
+                var mutation = mutations[index];
+                await RestoreSnapshotAsync(mutation.Path, mutation.Before, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         private async Task<DocumentEncodingInfo> ResolveEncodingInfoAsync(string path, XamlAstDocument? document, CancellationToken cancellationToken)

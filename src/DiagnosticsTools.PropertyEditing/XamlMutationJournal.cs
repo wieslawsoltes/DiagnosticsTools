@@ -35,6 +35,18 @@ namespace Avalonia.Diagnostics.PropertyEditing
             return true;
         }
 
+        public bool TryPeekUndo(out MutationEntry entry)
+        {
+            if (_undo.Count == 0)
+            {
+                entry = default;
+                return false;
+            }
+
+            entry = _undo.Peek();
+            return true;
+        }
+
         public void PushRedo(MutationEntry entry)
         {
             _redo.Push(entry);
@@ -49,6 +61,18 @@ namespace Avalonia.Diagnostics.PropertyEditing
             }
 
             entry = _redo.Pop();
+            return true;
+        }
+
+        public bool TryPeekRedo(out MutationEntry entry)
+        {
+            if (_redo.Count == 0)
+            {
+                entry = default;
+                return false;
+            }
+
+            entry = _redo.Peek();
             return true;
         }
 
@@ -87,7 +111,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
             while (stack.Count > 0)
             {
                 var entry = stack.Pop();
-                if (!PathComparer.Equals(entry.Path, path))
+                if (!ContainsPath(entry.Documents, path))
                 {
                     buffer.Push(entry);
                 }
@@ -98,7 +122,28 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 stack.Push(buffer.Pop());
             }
         }
+
+        private static bool ContainsPath(IReadOnlyList<DocumentMutation> documents, string path)
+        {
+            if (documents is null || documents.Count == 0)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < documents.Count; index++)
+            {
+                var documentPath = documents[index].Path;
+                if (!string.IsNullOrWhiteSpace(documentPath) && PathComparer.Equals(documentPath, path))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
-    internal readonly record struct MutationEntry(string Path, string Before, string After, ChangeEnvelope Envelope);
+    public readonly record struct DocumentMutation(ChangeEnvelope Envelope, string Path, string Before, string After);
+
+    public readonly record struct MutationEntry(IReadOnlyList<DocumentMutation> Documents);
 }

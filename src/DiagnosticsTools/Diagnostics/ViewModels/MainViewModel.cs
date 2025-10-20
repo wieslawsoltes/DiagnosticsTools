@@ -18,6 +18,7 @@ using Avalonia.Diagnostics.Runtime;
 using Microsoft.CodeAnalysis;
 using Avalonia.Diagnostics;
 using Avalonia.VisualTree;
+using Avalonia.Diagnostics.Services;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
@@ -61,6 +62,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly PropertyInspectorChangeEmitter _propertyChangeEmitter;
         private readonly Workspace? _roslynWorkspace;
         private readonly EventHandler<WorkspaceChangeEventArgs>? _workspaceChangedHandler;
+        private readonly ITemplateSourceResolver _templateSourceResolver;
+        private readonly ITemplateOverrideService _templateOverrideService;
     private const string LogicalTreeOwnerId = "Tree.Logical";
     private const string VisualTreeOwnerId = "Tree.Visual";
     private const string CombinedTreeOwnerId = "Tree.Combined";
@@ -81,6 +84,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _roslynWorkspace = roslynWorkspace;
             _xamlAstWorkspace = new XamlAstWorkspace(XamlAstInstrumentationAdapter.Instance);
+            _templateSourceResolver = new TemplateSourceResolver(_xamlAstWorkspace);
+            _templateOverrideService = new TemplateOverrideService();
             _runtimeCoordinator = new RuntimeMutationCoordinator();
             _selectionCoordinator = new SelectionCoordinator();
             _mutationDispatcher = new XamlMutationDispatcher(_xamlAstWorkspace, _roslynWorkspace);
@@ -99,11 +104,11 @@ namespace Avalonia.Diagnostics.ViewModels
             {
                 _workspaceChangedHandler = null;
             }
-            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _selectionCoordinator, LogicalTreeOwnerId);
+            _logicalTree = new TreePageViewModel(this, LogicalTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _templateSourceResolver, _templateOverrideService, _selectionCoordinator, LogicalTreeOwnerId);
             _logicalTree.AttachChangeEmitter(_propertyChangeEmitter);
-            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _selectionCoordinator, VisualTreeOwnerId);
+            _visualTree = new TreePageViewModel(this, VisualTreeNode.Create(root), _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _templateSourceResolver, _templateOverrideService, _selectionCoordinator, VisualTreeOwnerId);
             _visualTree.AttachChangeEmitter(_propertyChangeEmitter);
-            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _selectionCoordinator, CombinedTreeOwnerId);
+            _combinedTree = CombinedTreePageViewModel.FromRoot(this, root, _pinnedProperties, _sourceInfoService, _sourceNavigator, _xamlAstWorkspace, _runtimeCoordinator, _templateSourceResolver, _templateOverrideService, _selectionCoordinator, CombinedTreeOwnerId);
             _combinedTree.AttachChangeEmitter(_propertyChangeEmitter);
             AttachScopePersistence(
                 _combinedTree,

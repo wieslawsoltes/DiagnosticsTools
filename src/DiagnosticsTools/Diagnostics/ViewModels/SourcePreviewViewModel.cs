@@ -42,6 +42,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private double _splitRatio;
         private SourcePreviewSplitOrientation _splitOrientation;
         private bool _hasManualSnippet;
+        private bool _isReadOnly;
+        private string? _readOnlyMessage;
         private bool _suppressSplitEnabledPersistence;
         private bool _suppressSplitRatioPersistence;
         private static bool s_lastSplitEnabled;
@@ -57,6 +59,7 @@ namespace Avalonia.Diagnostics.ViewModels
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
+        private const string DefaultReadOnlyBanner = "Template source is read-only. Create a local override to edit.";
 
         public SourcePreviewViewModel(
             SourceInfo sourceInfo,
@@ -184,6 +187,14 @@ namespace Avalonia.Diagnostics.ViewModels
         public bool HasSnippet => !string.IsNullOrEmpty(Snippet);
 
         public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+
+        public bool IsReadOnly => _isReadOnly;
+
+        public string ReadOnlyBanner => !_isReadOnly
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(_readOnlyMessage)
+                ? DefaultReadOnlyBanner
+                : _readOnlyMessage!;
 
         public bool CanNavigateToAst => _navigateToAst is not null && AstSelection?.Node is not null;
 
@@ -357,6 +368,49 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             _navigateToAst?.Invoke(AstSelection?.Node);
+        }
+
+        public static SourcePreviewViewModel CreateTemplatePreview(
+            TemplatePreviewRequest request,
+            ISourceNavigator sourceNavigator,
+            MainViewModel? mutationOwner = null,
+            XamlAstWorkspace? workspace = null)
+        {
+            if (request is null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            var sourceInfo = BuildSourceInfo(request);
+            XamlAstSelection? selection = null;
+
+            if (request.Document is not null && request.SourceDescriptor is not null)
+            {
+                var nodes = request.DocumentNodes;
+                selection = nodes is not null
+                    ? new XamlAstSelection(request.Document, request.SourceDescriptor, nodes)
+                    : new XamlAstSelection(request.Document, request.SourceDescriptor);
+            }
+
+            var preview = new SourcePreviewViewModel(
+                sourceInfo,
+                sourceNavigator,
+                selection,
+                mutationOwner: mutationOwner,
+                xamlAstWorkspace: workspace);
+
+            if (!string.IsNullOrEmpty(request.SnapshotText))
+            {
+                var startLine = request.LineSpan?.Start.Line ?? 1;
+                preview.SetManualSnippet(request.SnapshotText, startLine);
+            }
+            else if (!string.IsNullOrEmpty(request.ErrorMessage))
+            {
+                preview.SetErrorMessage(request.ErrorMessage);
+            }
+
+            preview.SetReadOnlyState(request.IsReadOnly, request.ReadOnlyMessage);
+            return preview;
         }
 
         public static SourcePreviewViewModel CreateUnavailable(string? context, ISourceNavigator sourceNavigator, HttpClient? httpClient = null, MainViewModel? mutationOwner = null, SelectionCoordinator? selectionCoordinator = null, string? selectionOwnerId = null)
@@ -830,6 +884,24 @@ namespace Avalonia.Diagnostics.ViewModels
             RefreshNavigationState();
         }
 
+        private static SourceInfo BuildSourceInfo(TemplatePreviewRequest request)
+        {
+            var origin = !string.IsNullOrWhiteSpace(request.DocumentPath)
+                ? SourceOrigin.Local
+                : request.SourceUri is not null
+                    ? SourceOrigin.SourceLink
+                    : SourceOrigin.Unknown;
+
+            return new SourceInfo(
+                request.DocumentPath,
+                request.SourceUri,
+                request.LineSpan?.Start.Line,
+                request.LineSpan?.Start.Column,
+                request.LineSpan?.End.Line,
+                request.LineSpan?.End.Column,
+                origin);
+        }
+
         public void SetManualSnippet(string snippet, int snippetStartLine = 1)
         {
             _hasManualSnippet = true;
@@ -838,7 +910,22 @@ namespace Avalonia.Diagnostics.ViewModels
             Snippet = snippet;
             ClearHighlight();
             IsLoading = false;
+            ApplyHighlightForCurrentSelection();
             RefreshNavigationState();
+        }
+
+        internal void SetReadOnlyState(bool isReadOnly, string? message)
+        {
+            var normalizedMessage = string.IsNullOrWhiteSpace(message) ? null : message;
+            if (_isReadOnly == isReadOnly && string.Equals(_readOnlyMessage, normalizedMessage, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _isReadOnly = isReadOnly;
+            _readOnlyMessage = normalizedMessage;
+            RaisePropertyChanged(nameof(IsReadOnly));
+            RaisePropertyChanged(nameof(ReadOnlyBanner));
         }
 
         private void ApplyHighlightForCurrentSelection()

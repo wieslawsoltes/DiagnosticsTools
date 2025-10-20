@@ -33,5 +33,7 @@ namespace Avalonia.Diagnostics.PropertyEditing
         public string Frame { get; }
 
         public string ValueSource { get; }
+
+        public string? ScopeDescription { get; set; }
     }
 }

@@ -9,13 +9,37 @@
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
   </UserControl.Styles>
 
-  <avaloniaedit:TextEditor x:Name="SnippetTextEditor"
-                           IsReadOnly="True"
-                           ShowLineNumbers="True"
-                           WordWrap="False"
-                           HorizontalScrollBarVisibility="Auto"
-                           VerticalScrollBarVisibility="Auto"
-                           FontFamily="Consolas, Courier New, Menlo, monospace"
-                           FontSize="12"
-                           IsVisible="{Binding HasSnippet}" />
+  <StackPanel Spacing="6">
+    <Border Padding="6"
+            Background="#FFFDECC8"
+            BorderBrush="#FFE6B450"
+            BorderThickness="1"
+            CornerRadius="4"
+            IsVisible="{Binding IsReadOnly}">
+      <TextBlock Text="{Binding ReadOnlyBanner}"
+                 Foreground="#FF5C2D11"
+                 TextWrapping="Wrap"/>
+    </Border>
+
+    <Border Padding="6"
+            Background="#FFFDEFF0"
+            BorderBrush="#FFEAB5B6"
+            BorderThickness="1"
+            CornerRadius="4"
+            IsVisible="{Binding HasError}">
+      <TextBlock Text="{Binding ErrorMessage}"
+                 Foreground="#FF7C0A12"
+                 TextWrapping="Wrap"/>
+    </Border>
+
+    <avaloniaedit:TextEditor x:Name="SnippetTextEditor"
+                             IsReadOnly="True"
+                             ShowLineNumbers="True"
+                             WordWrap="False"
+                             HorizontalScrollBarVisibility="Auto"
+                             VerticalScrollBarVisibility="Auto"
+                             FontFamily="Consolas, Courier New, Menlo, monospace"
+                             FontSize="12"
+                             IsVisible="{Binding HasSnippet}" />
+  </StackPanel>
 </UserControl>

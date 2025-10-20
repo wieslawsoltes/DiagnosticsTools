@@ -14,6 +14,7 @@ using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Diagnostics.PropertyEditing;
+using Avalonia.Diagnostics.Services;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.Xaml;
@@ -38,6 +39,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private readonly HashSet<TreeNode> _trackedNodes = new();
         private readonly XamlAstWorkspace _xamlAstWorkspace;
         private readonly RuntimeMutationCoordinator _runtimeCoordinator;
+        private readonly ITemplateSourceResolver? _templateSourceResolver;
+        private readonly ITemplateOverrideService? _templateOverrideService;
         private TreeNode? _scopedRoot;
         private string? _scopedNodeKey;
         private bool _isScoped;
@@ -100,6 +103,8 @@ namespace Avalonia.Diagnostics.ViewModels
             ISourceNavigator sourceNavigator,
             XamlAstWorkspace xamlAstWorkspace,
             RuntimeMutationCoordinator runtimeCoordinator,
+            ITemplateSourceResolver? templateSourceResolver,
+            ITemplateOverrideService? templateOverrideService,
             SelectionCoordinator selectionCoordinator,
             string selectionOwnerId)
         {
@@ -111,6 +116,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _sourceNavigator = sourceNavigator ?? throw new ArgumentNullException(nameof(sourceNavigator));
             _xamlAstWorkspace = xamlAstWorkspace ?? throw new ArgumentNullException(nameof(xamlAstWorkspace));
             _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
+            _templateSourceResolver = templateSourceResolver;
+            _templateOverrideService = templateOverrideService;
             _selectionCoordinator = selectionCoordinator ?? throw new ArgumentNullException(nameof(selectionCoordinator));
             _selectionOwnerId = string.IsNullOrWhiteSpace(selectionOwnerId) ? throw new ArgumentException("Selection owner id must not be null or whitespace.", nameof(selectionOwnerId)) : selectionOwnerId;
             _previewOwnerId = selectionOwnerId + ".Preview";
@@ -231,7 +238,7 @@ namespace Avalonia.Diagnostics.ViewModels
                         _selectedNodeRevision++;
                     }
                     Details = value != null ?
-                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator, _runtimeCoordinator) :
+                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties, _sourceInfoService, _sourceNavigator, _runtimeCoordinator, _templateSourceResolver, _templateOverrideService) :
                         null;
                     _details?.AttachChangeEmitter(_changeEmitter);
                     Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
