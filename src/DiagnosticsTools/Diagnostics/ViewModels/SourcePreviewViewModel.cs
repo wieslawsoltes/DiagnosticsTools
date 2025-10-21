@@ -402,7 +402,7 @@ namespace Avalonia.Diagnostics.ViewModels
             if (!string.IsNullOrEmpty(request.SnapshotText))
             {
                 var startLine = request.LineSpan?.Start.Line ?? 1;
-                preview.SetManualSnippet(request.SnapshotText, startLine);
+                preview.SetManualSnippet(request.SnapshotText, startLine, applySelectionHighlight: selection is not null);
             }
             else if (!string.IsNullOrEmpty(request.ErrorMessage))
             {
@@ -902,7 +902,7 @@ namespace Avalonia.Diagnostics.ViewModels
                 origin);
         }
 
-        public void SetManualSnippet(string snippet, int snippetStartLine = 1)
+        public void SetManualSnippet(string snippet, int snippetStartLine = 1, bool applySelectionHighlight = false)
         {
             _hasManualSnippet = true;
             ErrorMessage = null;
@@ -910,7 +910,10 @@ namespace Avalonia.Diagnostics.ViewModels
             Snippet = snippet;
             ClearHighlight();
             IsLoading = false;
-            ApplyHighlightForCurrentSelection();
+            if (applySelectionHighlight)
+            {
+                ApplyHighlightForCurrentSelection();
+            }
             RefreshNavigationState();
         }
 
