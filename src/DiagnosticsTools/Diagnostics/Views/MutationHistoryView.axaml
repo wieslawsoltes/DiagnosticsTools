@@ -1,0 +1,81 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:viewModels="clr-namespace:Avalonia.Diagnostics.ViewModels;assembly=DiagnosticsTools"
+             x:Class="Avalonia.Diagnostics.Views.MutationHistoryView"
+             x:DataType="viewModels:MutationHistoryViewModel"
+             x:CompileBindings="True"
+             x:Name="Root">
+  <StackPanel Spacing="8">
+    <StackPanel Spacing="4"
+                IsVisible="{Binding HasUndoHistory}">
+      <TextBlock Text="Undo History"
+                 FontWeight="Bold" />
+      <ItemsControl ItemsSource="{Binding UndoHistory}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="4" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="viewModels:MutationHistoryEntryViewModel">
+            <Border Padding="8"
+                    Background="{DynamicResource ThemeControlLowBrush}"
+                    CornerRadius="4">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="{Binding Timestamp}"
+                             FontSize="11"
+                             Foreground="{DynamicResource ThemeForegroundLowBrush}" />
+                  <TextBlock Text="{Binding Gesture}"
+                             FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding DocumentsSummary}"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Undo to here"
+                        Command="{Binding #Root.DataContext.UndoToCommand}"
+                        CommandParameter="{Binding}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+
+    <StackPanel Spacing="4"
+                IsVisible="{Binding HasRedoHistory}">
+      <TextBlock Text="Redo History"
+                 FontWeight="Bold" />
+      <ItemsControl ItemsSource="{Binding RedoHistory}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="4" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="viewModels:MutationHistoryEntryViewModel">
+            <Border Padding="8"
+                    Background="{DynamicResource ThemeControlLowBrush}"
+                    CornerRadius="4">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="{Binding Timestamp}"
+                             FontSize="11"
+                             Foreground="{DynamicResource ThemeForegroundLowBrush}" />
+                  <TextBlock Text="{Binding Gesture}"
+                             FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding DocumentsSummary}"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Redo to here"
+                        Command="{Binding #Root.DataContext.RedoToCommand}"
+                        CommandParameter="{Binding}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

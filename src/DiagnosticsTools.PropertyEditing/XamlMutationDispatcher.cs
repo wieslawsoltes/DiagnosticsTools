@@ -51,6 +51,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
         public bool TryPeekRedo(out MutationEntry entry) => _journal.TryPeekRedo(out entry);
 
+        public IReadOnlyList<MutationEntry> GetUndoHistory() => _journal.GetUndoSnapshot();
+
+        public IReadOnlyList<MutationEntry> GetRedoHistory() => _journal.GetRedoSnapshot();
+
+        public event EventHandler? HistoryChanged;
+
         public async ValueTask<ChangeDispatchResult> DispatchAsync(ChangeEnvelope envelope, CancellationToken cancellationToken = default)
         {
             if (envelope is null)
@@ -75,7 +81,9 @@ namespace Avalonia.Diagnostics.PropertyEditing
             var (commitResult, documentMutation) = await CommitPreparedMutationAsync(prepared, cancellationToken).ConfigureAwait(false);
             if (commitResult.Status == ChangeDispatchStatus.Success && documentMutation is not null)
             {
-                _journal.Record(new MutationEntry(new[] { documentMutation.Value }));
+                var gesture = documentMutation.Value.Envelope?.Source?.Gesture;
+                _journal.Record(new MutationEntry(new[] { documentMutation.Value }, DateTimeOffset.UtcNow, gesture));
+                OnHistoryChanged();
             }
 
             OnMutationCompleted(envelope, commitResult);
@@ -137,7 +145,9 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
             if (committedMutations.Count > 0)
             {
-                _journal.Record(new MutationEntry(committedMutations.ToArray()));
+                var gesture = committedMutations[0].Envelope?.Source?.Gesture;
+                _journal.Record(new MutationEntry(committedMutations.ToArray(), DateTimeOffset.UtcNow, gesture));
+                OnHistoryChanged();
             }
 
             return ChangeDispatchResult.Success();
@@ -169,10 +179,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushRedo(entry);
+                OnHistoryChanged();
             }
             else
             {
                 _journal.PushUndo(entry);
+                OnHistoryChanged();
             }
 
             if (documents is not null)
@@ -212,10 +224,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
             if (result.Status == ChangeDispatchStatus.Success)
             {
                 _journal.PushUndo(entry);
+                OnHistoryChanged();
             }
             else
             {
                 _journal.PushRedo(entry);
+                OnHistoryChanged();
             }
 
             if (documents is not null)
@@ -705,6 +719,12 @@ namespace Avalonia.Diagnostics.PropertyEditing
             {
                 _journal.DiscardEntriesForPath(path!);
             }
+            OnHistoryChanged();
+        }
+
+        private void OnHistoryChanged()
+        {
+            HistoryChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private readonly struct DocumentEncodingInfo

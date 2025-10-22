@@ -13,11 +13,15 @@ using System.Threading;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Diagnostics.Controls;
+using Avalonia.Diagnostics;
 using Avalonia.Diagnostics.PropertyEditing;
 using Avalonia.Diagnostics.Services;
 using Avalonia.Diagnostics.SourceNavigation;
 using Avalonia.Diagnostics.Runtime;
 using Avalonia.Diagnostics.Xaml;
+using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Logging;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -52,6 +56,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private SourceInfo? _selectedNodeSourceInfo;
         private XamlAstSelection? _selectedNodeXaml;
         private readonly SelectionCoordinator _selectionCoordinator;
+        private readonly SelectionOverlayService _selectionOverlay;
+        private readonly LayoutHandleService _layoutHandles;
         private readonly string _selectionOwnerId;
         private readonly string _previewOwnerId;
         private readonly List<WeakReference<SourcePreviewViewModel>> _previewObservers = new();
@@ -119,6 +125,8 @@ namespace Avalonia.Diagnostics.ViewModels
             _templateSourceResolver = templateSourceResolver;
             _templateOverrideService = templateOverrideService;
             _selectionCoordinator = selectionCoordinator ?? throw new ArgumentNullException(nameof(selectionCoordinator));
+            _selectionOverlay = new SelectionOverlayService(mainView);
+            _layoutHandles = new LayoutHandleService(runtimeCoordinator, () => _changeEmitter);
             _selectionOwnerId = string.IsNullOrWhiteSpace(selectionOwnerId) ? throw new ArgumentException("Selection owner id must not be null or whitespace.", nameof(selectionOwnerId)) : selectionOwnerId;
             _previewOwnerId = selectionOwnerId + ".Preview";
             _changeEmitter = null;
@@ -256,6 +264,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     SelectedNodeSourceInfo = null;
                     SelectedNodeXaml = null;
                     _ = UpdateSelectedNodeSourceInfoAsync(value);
+                    _layoutHandles.UpdateSelection(value, null);
                 }
             }
         }
@@ -327,6 +336,7 @@ namespace Avalonia.Diagnostics.ViewModels
                     RaisePropertyChanged(nameof(CanPasteSubtree));
                     RaisePropertyChanged(nameof(CanPreviewSource));
                     UpdateCommandStates();
+                    _layoutHandles.UpdateSelection(SelectedNode, value);
                 }
             }
         }
@@ -420,6 +430,8 @@ namespace Avalonia.Diagnostics.ViewModels
         public void Dispose()
         {
             ClearMultiSelection();
+            _selectionOverlay.Dispose();
+            _layoutHandles.Dispose();
             ClearNodeSubscriptions();
 
             foreach (var node in Nodes)
@@ -623,6 +635,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
         private void NotifyPreviewSelectionChanged(XamlAstSelection? selection)
         {
+            _selectionOverlay.OnCoordinatorSelection(SelectedNode);
+
             IDisposable? publishToken = null;
             try
             {
@@ -4114,6 +4128,1061 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return Math.Abs(startLine - descriptorStart);
+        }
+
+        private sealed class SelectionOverlayService : IDisposable
+        {
+            private readonly MainViewModel _mainView;
+            private readonly PropertyChangedEventHandler _propertyChangedHandler;
+            private TreeNode? _currentNode;
+            private IDisposable? _currentAdorner;
+
+            public SelectionOverlayService(MainViewModel mainView)
+            {
+                _mainView = mainView ?? throw new ArgumentNullException(nameof(mainView));
+                _propertyChangedHandler = OnMainViewPropertyChanged;
+                _mainView.PropertyChanged += _propertyChangedHandler;
+            }
+
+            public void OnCoordinatorSelection(TreeNode? node)
+            {
+                _currentNode = node;
+                ScheduleUpdate();
+            }
+
+            private void ScheduleUpdate()
+            {
+                if (Dispatcher.UIThread.CheckAccess())
+                {
+                    ApplyOverlay();
+                }
+                else
+                {
+                    Dispatcher.UIThread.Post(ApplyOverlay, DispatcherPriority.Background);
+                }
+            }
+
+            private void ApplyOverlay()
+            {
+                _currentAdorner?.Dispose();
+                _currentAdorner = null;
+
+                if (_currentNode?.Visual is not Visual visual)
+                {
+                    return;
+                }
+
+                if (visual.DoesBelongToDevTool())
+                {
+                    return;
+                }
+
+                _currentAdorner = ControlHighlightAdorner.Add(visual, _mainView.ShouldVisualizeMarginPadding);
+            }
+
+            private void OnMainViewPropertyChanged(object? sender, PropertyChangedEventArgs e)
+            {
+                if (_currentNode is null)
+                {
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(e.PropertyName) ||
+                    e.PropertyName == nameof(MainViewModel.ShouldVisualizeMarginPadding))
+                {
+                    ScheduleUpdate();
+                }
+            }
+
+            public void Dispose()
+            {
+                _mainView.PropertyChanged -= _propertyChangedHandler;
+
+                if (Dispatcher.UIThread.CheckAccess())
+                {
+                    _currentAdorner?.Dispose();
+                }
+                else
+                {
+                    Dispatcher.UIThread.Post(() => _currentAdorner?.Dispose(), DispatcherPriority.Background);
+                }
+
+                _currentAdorner = null;
+                _currentNode = null;
+            }
+        }
+
+        private sealed class LayoutHandleService : IDisposable
+        {
+            private readonly RuntimeMutationCoordinator _runtimeCoordinator;
+            private readonly Func<PropertyInspectorChangeEmitter?> _emitterProvider;
+            private LayoutController? _controller;
+
+            public LayoutHandleService(
+                RuntimeMutationCoordinator runtimeCoordinator,
+                Func<PropertyInspectorChangeEmitter?> emitterProvider)
+            {
+                _runtimeCoordinator = runtimeCoordinator ?? throw new ArgumentNullException(nameof(runtimeCoordinator));
+                _emitterProvider = emitterProvider ?? throw new ArgumentNullException(nameof(emitterProvider));
+            }
+
+            public void UpdateSelection(TreeNode? node, XamlAstSelection? selection)
+            {
+                _controller?.Dispose();
+                _controller = null;
+
+                if (node?.Visual is not Control control)
+                {
+                    return;
+                }
+
+                if (selection?.Document is null || selection.Node is null)
+                {
+                    return;
+                }
+
+                var parent = control.VisualParent;
+
+                LayoutController? controller = parent switch
+                {
+                    Canvas canvas => new CanvasLayoutController(this, control, canvas, node, selection),
+                    Grid grid => new GridLayoutController(this, control, grid, node, selection),
+                    StackPanel stack => new StackPanelLayoutController(this, control, stack, node, selection),
+                    DockPanel dock => new DockLayoutController(this, control, dock, node, selection),
+                    _ => null
+                };
+
+                if (controller is null)
+                {
+                    return;
+                }
+
+                controller.Attach();
+                _controller = controller;
+            }
+
+            public void Dispose()
+            {
+                _controller?.Dispose();
+                _controller = null;
+            }
+
+            internal RuntimeMutationCoordinator RuntimeCoordinator => _runtimeCoordinator;
+
+            private PropertyInspectorChangeEmitter? ChangeEmitter => _emitterProvider();
+
+            internal async Task CommitAsync(
+                TreeNode node,
+                XamlAstSelection selection,
+                IReadOnlyList<LayoutPropertyChange> changes,
+                string gesture,
+                EditorCommandDescriptor? command = null)
+            {
+                if (changes is null || changes.Count == 0)
+                {
+                    return;
+                }
+
+                if (selection.Document is null || selection.Node is null)
+                {
+                    return;
+                }
+
+                var emitter = ChangeEmitter;
+                if (emitter is null)
+                {
+                    return;
+                }
+
+                var primary = changes[0];
+                var primaryContext = new PropertyChangeContext(
+                    node.Visual,
+                    primary.Property,
+                    selection.Document,
+                    selection.Node,
+                    frame: "LocalValue",
+                    valueSource: "LocalValue");
+
+                List<PropertyChangeContext>? additionalContexts = null;
+                List<object?>? additionalPrevious = null;
+
+                if (changes.Count > 1)
+                {
+                    additionalContexts = new List<PropertyChangeContext>(changes.Count - 1);
+                    additionalPrevious = new List<object?>(changes.Count - 1);
+
+                    for (var index = 1; index < changes.Count; index++)
+                    {
+                        var change = changes[index];
+                        additionalContexts.Add(new PropertyChangeContext(
+                            node.Visual,
+                            change.Property,
+                            selection.Document,
+                            selection.Node,
+                            frame: "LocalValue",
+                            valueSource: "LocalValue"));
+                        additionalPrevious.Add(change.OldValue);
+                    }
+                }
+
+                try
+                {
+                    await emitter.EmitLocalValueChangeAsync(
+                        primaryContext,
+                        primary.NewValue,
+                        primary.OldValue,
+                        gesture,
+                        command,
+                        additionalContexts,
+                        additionalPrevious).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Swallow errors – the runtime state has already been updated and
+                    // the mutation dispatcher will surface detailed diagnostics elsewhere.
+                }
+            }
+
+            internal readonly struct LayoutPropertyChange
+            {
+                public LayoutPropertyChange(AvaloniaProperty property, object? oldValue, object? newValue)
+                {
+                    Property = property ?? throw new ArgumentNullException(nameof(property));
+                    OldValue = oldValue;
+                    NewValue = newValue;
+                }
+
+                public AvaloniaProperty Property { get; }
+
+                public object? OldValue { get; }
+
+                public object? NewValue { get; }
+            }
+
+            private abstract class LayoutController : LayoutHandleAdorner.ILayoutHandleBehavior, IDisposable
+            {
+                protected LayoutHandleService Owner { get; }
+                protected Control Target { get; }
+                protected TreeNode Node { get; }
+                protected XamlAstSelection Selection { get; }
+                protected IDisposable? AdornerToken { get; private set; }
+                protected SnapGuideAdorner.Handle? GuideHandle { get; private set; }
+
+                protected LayoutController(LayoutHandleService owner, Control target, TreeNode node, XamlAstSelection selection)
+                {
+                    Owner = owner;
+                    Target = target;
+                    Node = node;
+                    Selection = selection;
+                }
+
+                public virtual void Attach()
+                {
+                    AdornerToken = LayoutHandleAdorner.Add(Target, this);
+                }
+
+                public virtual void Dispose()
+                {
+                    AdornerToken?.Dispose();
+                    AdornerToken = null;
+                    GuideHandle?.Dispose();
+                    GuideHandle = null;
+                }
+
+                public abstract IEnumerable<Rect> GetHandleRects(Rect bounds, double handleSize);
+
+                public abstract void OnPointerPressed(LayoutHandleAdorner sender, PointerPressedEventArgs e);
+
+                public abstract void OnPointerMoved(LayoutHandleAdorner sender, PointerEventArgs e);
+
+                public abstract void OnPointerReleased(LayoutHandleAdorner sender, PointerReleasedEventArgs e);
+
+                public abstract void OnPointerCaptureLost(LayoutHandleAdorner sender, PointerCaptureLostEventArgs e);
+
+                protected static double Normalize(double value)
+                    => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+                protected static bool AreClose(double left, double right)
+                    => Math.Abs(left - right) < 0.5;
+
+                protected void AttachGuides(Visual visual)
+                {
+                    GuideHandle?.Dispose();
+                    GuideHandle = SnapGuideAdorner.Add(visual);
+                }
+
+                protected void UpdateGuides(IReadOnlyList<SnapGuideAdorner.GuideSegment> guides)
+                {
+                    if (GuideHandle is { } handle)
+                    {
+                        handle.Adorner.UpdateGuides(guides);
+                    }
+                }
+
+                protected void ClearGuides()
+                {
+                    if (GuideHandle is { } handle)
+                    {
+                        handle.Adorner.Clear();
+                    }
+                }
+            }
+
+            private sealed class CanvasLayoutController : LayoutController
+            {
+                private readonly Canvas _canvas;
+                private RuntimeMutationCoordinator.PointerGestureSession? _gesture;
+                private bool _isDragging;
+                private Point _startCanvasPoint;
+                private double _initialLeft;
+                private double _initialTop;
+                private double _currentLeft;
+                private double _currentTop;
+                private readonly List<Rect> _siblingRects = new();
+                private readonly List<SnapGuideAdorner.GuideSegment> _guideSegments = new();
+                private const double SnapThreshold = 6.0;
+
+                public CanvasLayoutController(LayoutHandleService owner, Control target, Canvas canvas, TreeNode node, XamlAstSelection selection)
+                    : base(owner, target, node, selection)
+                {
+                    _canvas = canvas;
+                }
+
+                public override void Attach()
+                {
+                    base.Attach();
+                    AttachGuides(_canvas);
+                }
+
+                public override IEnumerable<Rect> GetHandleRects(Rect bounds, double handleSize)
+                {
+                    var half = handleSize / 2;
+                    yield return new Rect(bounds.TopLeft - new Point(half, half), new Size(handleSize, handleSize));
+                    yield return new Rect(bounds.TopRight - new Point(half, half), new Size(handleSize, handleSize));
+                    yield return new Rect(bounds.BottomLeft - new Point(half, half), new Size(handleSize, handleSize));
+                    yield return new Rect(bounds.BottomRight - new Point(half, half), new Size(handleSize, handleSize));
+                }
+
+                public override void OnPointerPressed(LayoutHandleAdorner sender, PointerPressedEventArgs e)
+                {
+                    if (_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(sender);
+                    _isDragging = true;
+
+                    _gesture = Owner.RuntimeCoordinator.BeginPointerGesture();
+                    _startCanvasPoint = e.GetPosition(_canvas);
+                    _initialLeft = GetCanvasValue(Canvas.GetLeft);
+                    _initialTop = GetCanvasValue(Canvas.GetTop);
+                    _currentLeft = _initialLeft;
+                    _currentTop = _initialTop;
+                    e.Handled = true;
+                }
+
+                public override void OnPointerMoved(LayoutHandleAdorner sender, PointerEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    var current = e.GetPosition(_canvas);
+                    var delta = current - _startCanvasPoint;
+
+                    var newLeft = Normalize(_initialLeft + delta.X);
+                    var newTop = Normalize(_initialTop + delta.Y);
+
+                    var guides = ComputeSnapGuides(ref newLeft, ref newTop);
+
+                    if (AreClose(newLeft, _currentLeft) && AreClose(newTop, _currentTop))
+                    {
+                        UpdateGuides(guides);
+                        return;
+                    }
+
+                    _currentLeft = newLeft;
+                    _currentTop = newTop;
+
+                    Canvas.SetLeft(Target, newLeft);
+                    Canvas.SetTop(Target, newTop);
+
+                    Owner.RuntimeCoordinator.RegisterPropertyChange(Target, Canvas.LeftProperty, _initialLeft, newLeft);
+                    Owner.RuntimeCoordinator.RegisterPropertyChange(Target, Canvas.TopProperty, _initialTop, newTop);
+
+                    UpdateGuides(guides);
+                    e.Handled = true;
+                }
+
+                public override async void OnPointerReleased(LayoutHandleAdorner sender, PointerReleasedEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(null);
+                    _isDragging = false;
+
+                    ClearGuides();
+
+                    var hasLeftChange = !AreClose(_currentLeft, _initialLeft);
+                    var hasTopChange = !AreClose(_currentTop, _initialTop);
+
+                    var gesture = _gesture;
+                    _gesture = null;
+
+                    if (!hasLeftChange && !hasTopChange)
+                    {
+                        gesture?.Cancel();
+                        Canvas.SetLeft(Target, _initialLeft);
+                        Canvas.SetTop(Target, _initialTop);
+                        return;
+                    }
+
+                    gesture?.Complete();
+
+                    var changes = new List<LayoutPropertyChange>();
+                    if (hasLeftChange)
+                    {
+                        changes.Add(new LayoutPropertyChange(Canvas.LeftProperty, _initialLeft, _currentLeft));
+                        _initialLeft = _currentLeft;
+                    }
+
+                    if (hasTopChange)
+                    {
+                        changes.Add(new LayoutPropertyChange(Canvas.TopProperty, _initialTop, _currentTop));
+                        _initialTop = _currentTop;
+                    }
+
+                    await Owner.CommitAsync(Node, Selection, changes, "CanvasDrag", EditorCommandDescriptor.Slider).ConfigureAwait(false);
+                }
+
+                public override void OnPointerCaptureLost(LayoutHandleAdorner sender, PointerCaptureLostEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    _isDragging = false;
+                    _gesture?.Cancel();
+                    _gesture = null;
+                    Canvas.SetLeft(Target, _initialLeft);
+                    Canvas.SetTop(Target, _initialTop);
+                    ClearGuides();
+                }
+
+                private double GetCanvasValue(Func<Control, double> getter)
+                {
+                    var value = getter(Target);
+                    return double.IsNaN(value) ? 0 : value;
+                }
+
+                private IReadOnlyList<SnapGuideAdorner.GuideSegment> ComputeSnapGuides(ref double newLeft, ref double newTop)
+                {
+                    _guideSegments.Clear();
+
+                    var width = Target.Bounds.Width;
+                    var height = Target.Bounds.Height;
+                    if (width <= 0 || height <= 0)
+                    {
+                        return _guideSegments;
+                    }
+
+                    CollectSiblingRects(_siblingRects);
+                    if (_siblingRects.Count == 0)
+                    {
+                        return _guideSegments;
+                    }
+
+                    var verticalCandidate = SnapCandidate.None;
+                    var horizontalCandidate = SnapCandidate.None;
+
+                    var targetLeft = newLeft;
+                    var targetTop = newTop;
+                    var targetRight = targetLeft + width;
+                    var targetBottom = targetTop + height;
+                    var targetCenterX = targetLeft + (width / 2);
+                    var targetCenterY = targetTop + (height / 2);
+
+                    foreach (var rect in _siblingRects)
+                    {
+                        EvaluateVertical(rect.Left, targetLeft, rect, ref verticalCandidate);
+                        EvaluateVertical(rect.Left + (rect.Width / 2), targetCenterX, rect, ref verticalCandidate);
+                        EvaluateVertical(rect.Right, targetRight, rect, ref verticalCandidate);
+
+                        EvaluateHorizontal(rect.Top, targetTop, rect, ref horizontalCandidate);
+                        EvaluateHorizontal(rect.Top + (rect.Height / 2), targetCenterY, rect, ref horizontalCandidate);
+                        EvaluateHorizontal(rect.Bottom, targetBottom, rect, ref horizontalCandidate);
+                    }
+
+                    if (verticalCandidate.IsValid && verticalCandidate.AbsDifference <= SnapThreshold)
+                    {
+                        newLeft += verticalCandidate.Difference;
+                    }
+
+                    if (horizontalCandidate.IsValid && horizontalCandidate.AbsDifference <= SnapThreshold)
+                    {
+                        newTop += horizontalCandidate.Difference;
+                    }
+
+                    if (verticalCandidate.IsValid && verticalCandidate.AbsDifference <= SnapThreshold)
+                    {
+                        var start = Math.Min(verticalCandidate.ReferenceRect.Top, newTop);
+                        var end = Math.Max(verticalCandidate.ReferenceRect.Bottom, newTop + height);
+                        _guideSegments.Add(new SnapGuideAdorner.GuideSegment(true, verticalCandidate.Position, start, end));
+                    }
+
+                    if (horizontalCandidate.IsValid && horizontalCandidate.AbsDifference <= SnapThreshold)
+                    {
+                        var start = Math.Min(horizontalCandidate.ReferenceRect.Left, newLeft);
+                        var end = Math.Max(horizontalCandidate.ReferenceRect.Right, newLeft + width);
+                        _guideSegments.Add(new SnapGuideAdorner.GuideSegment(false, horizontalCandidate.Position, start, end));
+                    }
+
+                    return _guideSegments;
+
+                    static void EvaluateVertical(double candidate, double targetValue, Rect reference, ref SnapCandidate current)
+                    {
+                        var diff = candidate - targetValue;
+                        var absDiff = Math.Abs(diff);
+
+                        if (!current.IsValid || absDiff < current.AbsDifference)
+                        {
+                            current = new SnapCandidate(true, candidate, diff, absDiff, reference);
+                        }
+                    }
+
+                    static void EvaluateHorizontal(double candidate, double targetValue, Rect reference, ref SnapCandidate current)
+                    {
+                        var diff = candidate - targetValue;
+                        var absDiff = Math.Abs(diff);
+
+                        if (!current.IsValid || absDiff < current.AbsDifference)
+                        {
+                            current = new SnapCandidate(false, candidate, diff, absDiff, reference);
+                        }
+                    }
+                }
+
+                private void CollectSiblingRects(List<Rect> buffer)
+                {
+                    buffer.Clear();
+
+                    if (Node.Parent is { } parentNode)
+                    {
+                        foreach (var child in parentNode.Children)
+                        {
+                            if (ReferenceEquals(child, Node))
+                            {
+                                continue;
+                            }
+
+                            if (child is TreeNode treeNode && treeNode.Visual is Control control)
+                            {
+                                var origin = control.TranslatePoint(default, _canvas);
+                                if (origin is { } point)
+                                {
+                                    var size = control.Bounds.Size;
+                                    if (size.Width > 0 && size.Height > 0)
+                                    {
+                                        buffer.Add(new Rect(point, size));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    var canvasSize = _canvas.Bounds.Size;
+                    if (canvasSize.Width > 0 && canvasSize.Height > 0)
+                    {
+                        buffer.Add(new Rect(new Point(0, 0), canvasSize));
+                    }
+                }
+
+                private readonly struct SnapCandidate
+                {
+                    public static SnapCandidate None => default;
+
+                    public SnapCandidate(bool isVertical, double position, double difference, double absDifference, Rect referenceRect)
+                    {
+                        IsVertical = isVertical;
+                        Position = position;
+                        Difference = difference;
+                        AbsDifference = absDifference;
+                        ReferenceRect = referenceRect;
+                        IsValid = true;
+                    }
+
+                    public bool IsVertical { get; }
+                    public double Position { get; }
+                    public double Difference { get; }
+                    public double AbsDifference { get; }
+                    public Rect ReferenceRect { get; }
+                    public bool IsValid { get; }
+                }
+            }
+
+            private sealed class GridLayoutController : LayoutController
+            {
+                private readonly Grid _grid;
+                private RuntimeMutationCoordinator.PointerGestureSession? _gesture;
+                private bool _isDragging;
+                private int _initialRow;
+                private int _initialColumn;
+                private int _currentRow;
+                private int _currentColumn;
+
+                public GridLayoutController(LayoutHandleService owner, Control target, Grid grid, TreeNode node, XamlAstSelection selection)
+                    : base(owner, target, node, selection)
+                {
+                    _grid = grid;
+                }
+
+                public override IEnumerable<Rect> GetHandleRects(Rect bounds, double handleSize)
+                {
+                    yield return CenterHandle(bounds, handleSize);
+                }
+
+                public override void OnPointerPressed(LayoutHandleAdorner sender, PointerPressedEventArgs e)
+                {
+                    if (_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(sender);
+                    _isDragging = true;
+
+                    _gesture = Owner.RuntimeCoordinator.BeginPointerGesture();
+                    _initialRow = Grid.GetRow(Target);
+                    _initialColumn = Grid.GetColumn(Target);
+                    _currentRow = _initialRow;
+                    _currentColumn = _initialColumn;
+                    e.Handled = true;
+                }
+
+                public override void OnPointerMoved(LayoutHandleAdorner sender, PointerEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    var position = e.GetPosition(_grid);
+                    var row = ResolveRow(position);
+                    var column = ResolveColumn(position);
+
+                    var changed = false;
+                    if (row != _currentRow)
+                    {
+                        _currentRow = row;
+                        Grid.SetRow(Target, row);
+                        Owner.RuntimeCoordinator.RegisterPropertyChange(Target, Grid.RowProperty, _initialRow, row);
+                        changed = true;
+                    }
+
+                    if (column != _currentColumn)
+                    {
+                        _currentColumn = column;
+                        Grid.SetColumn(Target, column);
+                        Owner.RuntimeCoordinator.RegisterPropertyChange(Target, Grid.ColumnProperty, _initialColumn, column);
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        e.Handled = true;
+                    }
+                }
+
+                public override async void OnPointerReleased(LayoutHandleAdorner sender, PointerReleasedEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(null);
+                    _isDragging = false;
+
+                    var rowChanged = _currentRow != _initialRow;
+                    var columnChanged = _currentColumn != _initialColumn;
+
+                    var gesture = _gesture;
+                    _gesture = null;
+
+                    if (!rowChanged && !columnChanged)
+                    {
+                        gesture?.Cancel();
+                        Grid.SetRow(Target, _initialRow);
+                        Grid.SetColumn(Target, _initialColumn);
+                        return;
+                    }
+
+                    gesture?.Complete();
+
+                    var changes = new List<LayoutPropertyChange>();
+                    if (rowChanged)
+                    {
+                        changes.Add(new LayoutPropertyChange(Grid.RowProperty, _initialRow, _currentRow));
+                        _initialRow = _currentRow;
+                    }
+
+                    if (columnChanged)
+                    {
+                        changes.Add(new LayoutPropertyChange(Grid.ColumnProperty, _initialColumn, _currentColumn));
+                        _initialColumn = _currentColumn;
+                    }
+
+                    await Owner.CommitAsync(Node, Selection, changes, "GridReposition", EditorCommandDescriptor.Slider).ConfigureAwait(false);
+                }
+
+                public override void OnPointerCaptureLost(LayoutHandleAdorner sender, PointerCaptureLostEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    _isDragging = false;
+                    _gesture?.Cancel();
+                    _gesture = null;
+                    Grid.SetRow(Target, _initialRow);
+                    Grid.SetColumn(Target, _initialColumn);
+                }
+
+                private Rect CenterHandle(Rect bounds, double handleSize)
+                {
+                    var center = bounds.Center;
+                    var offset = new Point(handleSize / 2, handleSize / 2);
+                    return new Rect(center - offset, new Size(handleSize, handleSize));
+                }
+
+                private int ResolveRow(Point position)
+                {
+                    var definitions = _grid.RowDefinitions;
+                    if (definitions.Count == 0)
+                    {
+                        return 0;
+                    }
+
+                    var accumulated = 0.0;
+                    for (var index = 0; index < definitions.Count; index++)
+                    {
+                        var height = definitions[index].ActualHeight;
+                        if (height <= 0)
+                        {
+                            continue;
+                        }
+
+                        accumulated += height;
+                        if (position.Y <= accumulated)
+                        {
+                            return index;
+                        }
+                    }
+
+                    return definitions.Count - 1;
+                }
+
+                private int ResolveColumn(Point position)
+                {
+                    var definitions = _grid.ColumnDefinitions;
+                    if (definitions.Count == 0)
+                    {
+                        return 0;
+                    }
+
+                    var accumulated = 0.0;
+                    for (var index = 0; index < definitions.Count; index++)
+                    {
+                        var width = definitions[index].ActualWidth;
+                        if (width <= 0)
+                        {
+                            continue;
+                        }
+
+                        accumulated += width;
+                        if (position.X <= accumulated)
+                        {
+                            return index;
+                        }
+                    }
+
+                    return definitions.Count - 1;
+                }
+            }
+
+            private sealed class StackPanelLayoutController : LayoutController
+            {
+                private readonly StackPanel _stackPanel;
+                private readonly Orientation _orientation;
+                private RuntimeMutationCoordinator.PointerGestureSession? _gesture;
+                private bool _isDragging;
+                private Point _startPoint;
+                private Thickness _initialMargin;
+                private Thickness _currentMargin;
+
+                public StackPanelLayoutController(LayoutHandleService owner, Control target, StackPanel stackPanel, TreeNode node, XamlAstSelection selection)
+                    : base(owner, target, node, selection)
+                {
+                    _stackPanel = stackPanel ?? throw new ArgumentNullException(nameof(stackPanel));
+                    _orientation = stackPanel.Orientation;
+                }
+
+                public override void Attach()
+                {
+                    base.Attach();
+                    AttachGuides(_stackPanel);
+                }
+
+                public override IEnumerable<Rect> GetHandleRects(Rect bounds, double handleSize)
+                {
+                    var center = bounds.Center;
+                    var offset = handleSize / 2;
+                    yield return new Rect(center - new Point(offset, offset), new Size(handleSize, handleSize));
+                }
+
+                public override void OnPointerPressed(LayoutHandleAdorner sender, PointerPressedEventArgs e)
+                {
+                    if (_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(sender);
+                    _isDragging = true;
+
+                    _gesture = Owner.RuntimeCoordinator.BeginPointerGesture();
+                    _startPoint = e.GetPosition(_stackPanel);
+                    _initialMargin = Target.Margin;
+                    _currentMargin = _initialMargin;
+                    e.Handled = true;
+                }
+
+                public override void OnPointerMoved(LayoutHandleAdorner sender, PointerEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    var current = e.GetPosition(_stackPanel);
+                    var delta = current - _startPoint;
+
+                    var updatedMargin = _orientation == Orientation.Vertical
+                        ? new Thickness(_initialMargin.Left, Normalize(_initialMargin.Top + delta.Y), _initialMargin.Right, _initialMargin.Bottom)
+                        : new Thickness(Normalize(_initialMargin.Left + delta.X), _initialMargin.Top, _initialMargin.Right, _initialMargin.Bottom);
+
+                    if (AreMarginClose(updatedMargin, _currentMargin))
+                    {
+                        return;
+                    }
+
+                    _currentMargin = updatedMargin;
+                    Target.Margin = updatedMargin;
+                    Owner.RuntimeCoordinator.RegisterPropertyChange(Target, Layoutable.MarginProperty, _initialMargin, updatedMargin);
+                    UpdateGuides(Array.Empty<SnapGuideAdorner.GuideSegment>());
+                    e.Handled = true;
+                }
+
+                public override async void OnPointerReleased(LayoutHandleAdorner sender, PointerReleasedEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(null);
+                    _isDragging = false;
+                    ClearGuides();
+
+                    var gesture = _gesture;
+                    _gesture = null;
+
+                    if (AreMarginClose(_currentMargin, _initialMargin))
+                    {
+                        gesture?.Cancel();
+                        Target.Margin = _initialMargin;
+                        return;
+                    }
+
+                    gesture?.Complete();
+
+                    await Owner.CommitAsync(Node, Selection, new[]
+                    {
+                        new LayoutPropertyChange(Layoutable.MarginProperty, _initialMargin, _currentMargin)
+                    }, "StackPanelAdjust", EditorCommandDescriptor.Slider).ConfigureAwait(false);
+
+                    _initialMargin = _currentMargin;
+                }
+
+                public override void OnPointerCaptureLost(LayoutHandleAdorner sender, PointerCaptureLostEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    _isDragging = false;
+                    _gesture?.Cancel();
+                    _gesture = null;
+                    Target.Margin = _initialMargin;
+                    ClearGuides();
+                }
+
+                private static bool AreMarginClose(Thickness left, Thickness right) =>
+                    AreClose(left.Left, right.Left) &&
+                    AreClose(left.Top, right.Top) &&
+                    AreClose(left.Right, right.Right) &&
+                    AreClose(left.Bottom, right.Bottom);
+            }
+
+            private sealed class DockLayoutController : LayoutController
+            {
+                private readonly DockPanel _dockPanel;
+                private RuntimeMutationCoordinator.PointerGestureSession? _gesture;
+                private bool _isDragging;
+                private Dock _initialDock;
+                private Dock _currentDock;
+
+                public DockLayoutController(LayoutHandleService owner, Control target, DockPanel dockPanel, TreeNode node, XamlAstSelection selection)
+                    : base(owner, target, node, selection)
+                {
+                    _dockPanel = dockPanel;
+                }
+
+                public override void Attach()
+                {
+                    base.Attach();
+                    AttachGuides(_dockPanel);
+                }
+
+                public override IEnumerable<Rect> GetHandleRects(Rect bounds, double handleSize)
+                {
+                    var thickness = handleSize;
+                    yield return new Rect(bounds.X + (bounds.Width - thickness) / 2, bounds.Y - thickness / 2, thickness, thickness);
+                    yield return new Rect(bounds.Right - thickness / 2, bounds.Y + (bounds.Height - thickness) / 2, thickness, thickness);
+                    yield return new Rect(bounds.X + (bounds.Width - thickness) / 2, bounds.Bottom - thickness / 2, thickness, thickness);
+                    yield return new Rect(bounds.X - thickness / 2, bounds.Y + (bounds.Height - thickness) / 2, thickness, thickness);
+                }
+
+                public override void OnPointerPressed(LayoutHandleAdorner sender, PointerPressedEventArgs e)
+                {
+                    if (_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(sender);
+                    _isDragging = true;
+
+                    _gesture = Owner.RuntimeCoordinator.BeginPointerGesture();
+                    _initialDock = DockPanel.GetDock(Target);
+                    _currentDock = _initialDock;
+                    e.Handled = true;
+                }
+
+                public override void OnPointerMoved(LayoutHandleAdorner sender, PointerEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    var dock = ResolveDock(e.GetPosition(_dockPanel));
+                    if (dock == _currentDock)
+                    {
+                        return;
+                    }
+
+                    _currentDock = dock;
+                    DockPanel.SetDock(Target, dock);
+                    Owner.RuntimeCoordinator.RegisterPropertyChange(Target, DockPanel.DockProperty, _initialDock, dock);
+                    e.Handled = true;
+                }
+
+                public override async void OnPointerReleased(LayoutHandleAdorner sender, PointerReleasedEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    e.Pointer.Capture(null);
+                    _isDragging = false;
+
+                    var gesture = _gesture;
+                    _gesture = null;
+
+                    if (_currentDock == _initialDock)
+                    {
+                        gesture?.Cancel();
+                        DockPanel.SetDock(Target, _initialDock);
+                        return;
+                    }
+
+                    gesture?.Complete();
+
+                    var change = new LayoutPropertyChange(DockPanel.DockProperty, _initialDock, _currentDock);
+                    _initialDock = _currentDock;
+
+                    await Owner.CommitAsync(Node, Selection, new[] { change }, "DockAdjust", EditorCommandDescriptor.Default).ConfigureAwait(false);
+                }
+
+                public override void OnPointerCaptureLost(LayoutHandleAdorner sender, PointerCaptureLostEventArgs e)
+                {
+                    if (!_isDragging)
+                    {
+                        return;
+                    }
+
+                    _isDragging = false;
+                    _gesture?.Cancel();
+                    _gesture = null;
+                    DockPanel.SetDock(Target, _initialDock);
+                }
+
+                private Dock ResolveDock(Point position)
+                {
+                    var size = _dockPanel.Bounds.Size;
+                    if (size.Width <= 0 || size.Height <= 0)
+                    {
+                        return _initialDock;
+                    }
+
+                    var horizontalRatio = position.X / Math.Max(size.Width, 1);
+                    var verticalRatio = position.Y / Math.Max(size.Height, 1);
+
+                    const double edgeThreshold = 0.25;
+
+                    if (horizontalRatio <= edgeThreshold)
+                    {
+                        return Dock.Left;
+                    }
+
+                    if (horizontalRatio >= 1 - edgeThreshold)
+                    {
+                        return Dock.Right;
+                    }
+
+                    if (verticalRatio <= edgeThreshold)
+                    {
+                        return Dock.Top;
+                    }
+
+                    if (verticalRatio >= 1 - edgeThreshold)
+                    {
+                        return Dock.Bottom;
+                    }
+
+                    return _initialDock;
+                }
+            }
         }
     }
 

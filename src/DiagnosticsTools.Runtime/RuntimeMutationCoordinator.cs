@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -14,6 +15,7 @@ public sealed class RuntimeMutationCoordinator
 {
     private readonly Stack<IRuntimeMutation> _undo = new();
     private readonly Stack<IRuntimeMutation> _redo = new();
+    private readonly Stack<PointerGestureSession> _gestureStack = new();
 
     /// <summary>
     /// Gets whether there are pending mutations that can be undone.
@@ -45,6 +47,12 @@ public sealed class RuntimeMutationCoordinator
             return;
         }
 
+        if (_gestureStack.Count > 0)
+        {
+            _gestureStack.Peek().RegisterChange(target, property, oldValue, newValue);
+            return;
+        }
+
         var mutation = new PropertyMutation(target, property, oldValue, newValue);
         if (!mutation.IsMeaningful)
         {
@@ -53,6 +61,19 @@ public sealed class RuntimeMutationCoordinator
 
         _undo.Push(mutation);
         _redo.Clear();
+    }
+
+    /// <summary>
+    /// Begins a pointer gesture session that coalesces subsequent property changes into a single undo unit.
+    /// </summary>
+    /// <returns>A disposable session that must be completed or cancelled.</returns>
+    public PointerGestureSession BeginPointerGesture()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        var session = new PointerGestureSession(this);
+        _gestureStack.Push(session);
+        return session;
     }
 
     /// <summary>
@@ -112,10 +133,325 @@ public sealed class RuntimeMutationCoordinator
         _undo.Push(mutation);
     }
 
+    private void CompletePointerGesture(PointerGestureSession session)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (!TryPopGesture(session))
+        {
+            return;
+        }
+
+        var snapshot = session.CloseForCommit();
+        if (snapshot.Count == 0)
+        {
+            return;
+        }
+
+        var mutation = new PointerGestureMutation(snapshot);
+        if (!mutation.HasChanges)
+        {
+            return;
+        }
+
+        _undo.Push(mutation);
+        _redo.Clear();
+    }
+
+    private void CancelPointerGesture(PointerGestureSession session)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (!TryPopGesture(session))
+        {
+            return;
+        }
+
+        session.CloseWithoutCommit();
+    }
+
+    private void DisposePointerGesture(PointerGestureSession session)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (session.IsActive)
+        {
+            CancelPointerGesture(session);
+        }
+    }
+
+    private bool TryPopGesture(PointerGestureSession session)
+    {
+        if (_gestureStack.Count == 0)
+        {
+            return false;
+        }
+
+        if (!ReferenceEquals(_gestureStack.Peek(), session))
+        {
+            throw new InvalidOperationException("Pointer gestures must be closed in the order they were opened.");
+        }
+
+        _gestureStack.Pop();
+        return true;
+    }
+
     private interface IRuntimeMutation
     {
         void ApplyUndo();
         void ApplyRedo();
+    }
+
+    /// <summary>
+    /// Represents a pointer gesture session that groups multiple property changes into a single mutation.
+    /// </summary>
+    public sealed class PointerGestureSession : IDisposable
+    {
+        private readonly RuntimeMutationCoordinator _owner;
+        private readonly Dictionary<PropertyKey, GestureEntry> _entries = new();
+        private PointerGestureState _state;
+
+        internal PointerGestureSession(RuntimeMutationCoordinator owner)
+        {
+            _owner = owner;
+            _state = PointerGestureState.Active;
+        }
+
+        internal bool IsActive => _state == PointerGestureState.Active;
+
+        internal IReadOnlyCollection<GestureEntry> CloseForCommit()
+        {
+            if (_state != PointerGestureState.Active)
+            {
+                return Array.Empty<GestureEntry>();
+            }
+
+            _state = PointerGestureState.Completed;
+
+            if (_entries.Count == 0)
+            {
+                return Array.Empty<GestureEntry>();
+            }
+
+            var list = new List<GestureEntry>(_entries.Count);
+            foreach (var entry in _entries.Values)
+            {
+                if (entry.IsMeaningful)
+                {
+                    list.Add(entry);
+                }
+            }
+
+            _entries.Clear();
+            return list;
+        }
+
+        internal void CloseWithoutCommit()
+        {
+            if (_state != PointerGestureState.Active)
+            {
+                return;
+            }
+
+            _entries.Clear();
+            _state = PointerGestureState.Cancelled;
+        }
+
+        internal void RegisterChange(
+            AvaloniaObject target,
+            AvaloniaProperty property,
+            object? oldValue,
+            object? newValue)
+        {
+            if (_state != PointerGestureState.Active)
+            {
+                throw new InvalidOperationException("Pointer gesture session is no longer active.");
+            }
+
+            var key = new PropertyKey(target, property);
+            if (_entries.TryGetValue(key, out var existing))
+            {
+                existing.UpdateNewValue(newValue);
+                return;
+            }
+
+            if (Equals(oldValue, newValue))
+            {
+                return;
+            }
+
+            _entries.Add(key, new GestureEntry(target, property, oldValue, newValue));
+        }
+
+        /// <summary>
+        /// Commits the pointer gesture, coalescing recorded property changes into a single undo unit.
+        /// </summary>
+        public void Complete()
+        {
+            if (_state != PointerGestureState.Active)
+            {
+                return;
+            }
+
+            _owner.CompletePointerGesture(this);
+        }
+
+        /// <summary>
+        /// Cancels the pointer gesture, discarding any recorded property changes.
+        /// </summary>
+        public void Cancel()
+        {
+            if (_state != PointerGestureState.Active)
+            {
+                return;
+            }
+
+            _owner.CancelPointerGesture(this);
+        }
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            if (_state == PointerGestureState.Active)
+            {
+                _owner.DisposePointerGesture(this);
+            }
+        }
+
+        private readonly struct PropertyKey : IEquatable<PropertyKey>
+        {
+            public PropertyKey(AvaloniaObject target, AvaloniaProperty property)
+            {
+                Target = target;
+                Property = property;
+            }
+
+            public AvaloniaObject Target { get; }
+            public AvaloniaProperty Property { get; }
+
+            public bool Equals(PropertyKey other) =>
+                ReferenceEquals(Target, other.Target) && ReferenceEquals(Property, other.Property);
+
+            public override bool Equals(object? obj) => obj is PropertyKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hash = 17;
+                    hash = (hash * 31) + RuntimeHelpers.GetHashCode(Target);
+                    hash = (hash * 31) + Property.GetHashCode();
+                    return hash;
+                }
+            }
+        }
+
+        internal sealed class GestureEntry
+        {
+            public GestureEntry(AvaloniaObject target, AvaloniaProperty property, object? originalValue, object? currentValue)
+            {
+                Target = target;
+                Property = property;
+                OriginalValue = originalValue;
+                CurrentValue = currentValue;
+            }
+
+            public AvaloniaObject Target { get; }
+            public AvaloniaProperty Property { get; }
+            public object? OriginalValue { get; }
+            public object? CurrentValue { get; private set; }
+
+            public bool IsMeaningful => !Equals(OriginalValue, CurrentValue);
+
+            public void UpdateNewValue(object? value) => CurrentValue = value;
+        }
+
+        private enum PointerGestureState
+        {
+            Active,
+            Completed,
+            Cancelled
+        }
+    }
+
+    private sealed class PointerGestureMutation : IRuntimeMutation
+    {
+        private readonly GestureStep[] _steps;
+
+        public PointerGestureMutation(IEnumerable<PointerGestureSession.GestureEntry> entries)
+        {
+            if (entries is null)
+            {
+                _steps = Array.Empty<GestureStep>();
+                return;
+            }
+
+            var list = new List<GestureStep>();
+            foreach (var entry in entries)
+            {
+                if (!entry.IsMeaningful)
+                {
+                    continue;
+                }
+
+                list.Add(new GestureStep(entry.Target, entry.Property, entry.OriginalValue, entry.CurrentValue));
+            }
+
+            _steps = list.ToArray();
+        }
+
+        public bool HasChanges => _steps.Length > 0;
+
+        public void ApplyUndo()
+        {
+            for (var i = 0; i < _steps.Length; i++)
+            {
+                var step = _steps[i];
+                if (step.Target.TryGetTarget(out var target))
+                {
+                    SetValue(target, step.Property, step.OldValue);
+                }
+            }
+        }
+
+        public void ApplyRedo()
+        {
+            for (var i = 0; i < _steps.Length; i++)
+            {
+                var step = _steps[i];
+                if (step.Target.TryGetTarget(out var target))
+                {
+                    SetValue(target, step.Property, step.NewValue);
+                }
+            }
+        }
+
+        private readonly struct GestureStep
+        {
+            public GestureStep(AvaloniaObject target, AvaloniaProperty property, object? oldValue, object? newValue)
+            {
+                Target = new WeakReference<AvaloniaObject>(target);
+                Property = property;
+                OldValue = oldValue;
+                NewValue = newValue;
+            }
+
+            public WeakReference<AvaloniaObject> Target { get; }
+            public AvaloniaProperty Property { get; }
+            public object? OldValue { get; }
+            public object? NewValue { get; }
+        }
+
+        private static void SetValue(AvaloniaObject target, AvaloniaProperty property, object? value)
+        {
+            if (ReferenceEquals(value, AvaloniaProperty.UnsetValue))
+            {
+                target.ClearValue(property);
+                return;
+            }
+
+            target.SetValue(property, value);
+        }
     }
 
     private sealed class PropertyMutation : IRuntimeMutation
@@ -396,4 +732,3 @@ public sealed class RuntimeMutationCoordinator
         return value;
     }
 }
-

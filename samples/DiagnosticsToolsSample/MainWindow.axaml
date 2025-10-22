@@ -210,5 +210,92 @@
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
+
+        <TabItem Header="Visual Editing">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="12" Spacing="20">
+                    <TextBlock FontSize="24"
+                               FontWeight="SemiBold"
+                               Text="Visual Editing Playground" />
+                    <TextBlock Foreground="#FF475569"
+                               TextWrapping="Wrap"
+                               MaxWidth="360"
+                               Text="Select a control below and drag it while DevTools is open on the Combined Tree. Canvas children move freely with snap guides, Grid children switch rows/columns, StackPanel children shift using margins, and DockPanel children update their dock edge." />
+
+                    <Border BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10" Padding="12" MaxWidth="360">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Canvas Playground" FontSize="18" FontWeight="SemiBold" />
+                            <Canvas Width="320" Height="160" Background="#FFE2E8F0">
+                                <Button Content="Canvas A" Width="80" Height="36" Canvas.Left="20.74" Canvas.Top="18" />
+                                <Button Content="Canvas B" Width="80" Height="36" Canvas.Left="118" Canvas.Top="70" />
+                                <Button Content="Canvas C" Width="80" Height="36" Canvas.Left="218" Canvas.Top="32" />
+                            </Canvas>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10" Padding="12" MaxWidth="360">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Grid Playground" FontSize="18" FontWeight="SemiBold" />
+                            <Grid Width="320" Height="160" Background="#FFF8FAFC" ColumnDefinitions="*,*,*" RowDefinitions="*,*" Margin="0">
+                                <Border Background="#FFBFDBFE" Margin="6" Grid.Column="0" Grid.Row="0">
+                                    <Button Content="Grid (0,0)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFC4F1F9" Margin="6" Grid.Column="1" Grid.Row="0">
+                                    <Button Content="Grid (1,0)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFE5DEFF" Margin="6" Grid.Column="2" Grid.Row="0">
+                                    <Button Content="Grid (2,0)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFD9F99D" Margin="6" Grid.Column="0" Grid.Row="1">
+                                    <Button Content="Grid (0,1)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFFFE4E6" Margin="6" Grid.Column="1" Grid.Row="1">
+                                    <Button Content="Grid (1,1)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFFDD6A7" Margin="6" Grid.Column="2" Grid.Row="1">
+                                    <Button Content="Grid (2,1)" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10" Padding="12" MaxWidth="360">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="StackPanel Playground" FontSize="18" FontWeight="SemiBold" />
+                            <Border Background="#FFF8FAFC" Padding="12" CornerRadius="6">
+                                <StackPanel Spacing="8" Width="220">
+                                    <Button Content="Stack Item A" Margin="0" />
+                                    <Button Content="Stack Item B" Margin="12,0,0,0" />
+                                    <Button Content="Stack Item C" Margin="24,0,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="#FFD1D5DB" BorderThickness="1" CornerRadius="10" Padding="12" MaxWidth="360">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="DockPanel Playground" FontSize="18" FontWeight="SemiBold" />
+                            <DockPanel Background="#FFF8FAFC" Width="320" Height="200" LastChildFill="True">
+                                <Border Background="#FFBFDBFE" Height="40" DockPanel.Dock="Top" Margin="6">
+                                    <Button Content="Dock Top" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFC4F1F9" Width="80" DockPanel.Dock="Left" Margin="6">
+                                    <Button Content="Dock Left" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFE5DEFF" Width="80" DockPanel.Dock="Right" Margin="6">
+                                    <Button Content="Dock Right" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFD9F99D" Height="50" DockPanel.Dock="Bottom" Margin="6">
+                                    <Button Content="Dock Bottom" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <Border Background="#FFFFF1F3" Margin="6">
+                                    <TextBox Text="Content Area" VerticalAlignment="Center" HorizontalAlignment="Center" Width="140" />
+                                </Border>
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
     </TabControl>
 </Window>

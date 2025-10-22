@@ -43,7 +43,7 @@
       <ColumnDefinition Width="320" lb:ColumnDefinition.IsVisible="{Binding Layout, Converter={x:Static ObjectConverters.IsNotNull}}" />
     </Grid.ColumnDefinitions>
     
-    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,*">
+    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,Auto,*">
 
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto, Auto">
         <Button Grid.Column="0" Grid.RowSpan="2" Content="^" 
@@ -114,10 +114,18 @@
         </StackPanel>
       </StackPanel>
       
+      <Expander Grid.Row="3"
+                Header="Design Surface History"
+                Margin="0 4 0 4"
+                IsExpanded="{Binding IsMutationHistoryExpanded}"
+                IsVisible="{Binding MutationHistory.HasHistory}">
+        <local:MutationHistoryView DataContext="{Binding MutationHistory}" />
+      </Expander>
+
       <DataGrid 
                 x:Name="DataGrid"
                 ItemsSource="{Binding PropertiesView}"
-                Grid.Row="3"
+                Grid.Row="4"
                 BorderThickness="0"
                 RowBackground="Transparent"
                 SelectedItem="{Binding SelectedProperty, Mode=TwoWay}"

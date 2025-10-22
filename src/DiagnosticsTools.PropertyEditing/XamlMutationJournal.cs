@@ -81,6 +81,10 @@ namespace Avalonia.Diagnostics.PropertyEditing
             _undo.Push(entry);
         }
 
+        public MutationEntry[] GetUndoSnapshot() => _undo.ToArray();
+
+        public MutationEntry[] GetRedoSnapshot() => _redo.ToArray();
+
         public void Clear()
         {
             _undo.Clear();
@@ -145,5 +149,5 @@ namespace Avalonia.Diagnostics.PropertyEditing
 
     public readonly record struct DocumentMutation(ChangeEnvelope Envelope, string Path, string Before, string After);
 
-    public readonly record struct MutationEntry(IReadOnlyList<DocumentMutation> Documents);
+    public readonly record struct MutationEntry(IReadOnlyList<DocumentMutation> Documents, DateTimeOffset Timestamp, string? Gesture);
 }

@@ -71,6 +71,8 @@ namespace Avalonia.Diagnostics.ViewModels
         private ExternalDocumentChangedEventArgs? _externalDocumentChange;
         private string? _undoMutationDescription;
         private string? _redoMutationDescription;
+        private readonly MutationHistoryViewModel _mutationHistory;
+        private bool _isMutationHistoryExpanded = true;
 
         public ControlDetailsViewModel(
             TreePageViewModel treePage,
@@ -99,6 +101,7 @@ namespace Avalonia.Diagnostics.ViewModels
             _redoMutationCommand = new DelegateCommand(RedoMutationAsync, () => CanRedoMutation);
             _reloadExternalDocumentCommand = new DelegateCommand(ReloadExternalDocumentAsync, () => HasExternalDocumentChanges);
             _dismissExternalDocumentChangeCommand = new DelegateCommand(DismissExternalDocumentChange, () => HasExternalDocumentChanges);
+            _mutationHistory = new MutationHistoryViewModel(UndoHistoryEntryAsync, RedoHistoryEntryAsync);
 
             NavigateToProperty(_avaloniaObject, (_avaloniaObject as Control)?.Name ?? _avaloniaObject.ToString());
 
@@ -132,6 +135,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
                 UpdateStyles();
             }
+
+            RefreshMutationHistory();
         }
 
     public bool CanNavigateToParentProperty => _selectedEntitiesStack.Count >= 1;
@@ -214,6 +219,14 @@ namespace Avalonia.Diagnostics.ViewModels
             private set => RaiseAndSetIfChanged(ref _redoMutationDescription, value);
         }
 
+        public MutationHistoryViewModel MutationHistory => _mutationHistory;
+
+        public bool IsMutationHistoryExpanded
+        {
+            get => _isMutationHistoryExpanded;
+            set => RaiseAndSetIfChanged(ref _isMutationHistoryExpanded, value);
+        }
+
         public string? MutationStatusMessage
         {
             get => _mutationStatusMessage;
@@ -288,8 +301,24 @@ namespace Avalonia.Diagnostics.ViewModels
                 _changeEmitter.ExternalDocumentChanged -= OnExternalDocumentChanged;
             }
 
+            if (_mutationDispatcher is not null)
+            {
+                _mutationDispatcher.HistoryChanged -= OnMutationHistoryChanged;
+            }
+
+            var previousDispatcher = _mutationDispatcher;
             _changeEmitter = changeEmitter;
             _mutationDispatcher = _changeEmitter?.MutationDispatcher;
+
+            if (previousDispatcher is not null)
+            {
+                previousDispatcher.HistoryChanged -= OnMutationHistoryChanged;
+            }
+
+            if (_mutationDispatcher is not null)
+            {
+                _mutationDispatcher.HistoryChanged += OnMutationHistoryChanged;
+            }
 
             if (_changeEmitter is not null)
             {
@@ -304,6 +333,7 @@ namespace Avalonia.Diagnostics.ViewModels
 
             UpdateMutationCommandStates();
             RaisePropertyChanged(nameof(ShowMutationCommands));
+            RefreshMutationHistory();
         }
 
         public void UpdateSourceNavigation(ISourceInfoService sourceInfoService, ISourceNavigator sourceNavigator)
@@ -632,6 +662,7 @@ namespace Avalonia.Diagnostics.ViewModels
             RaisePropertyChanged(nameof(CanRedoMutation));
             RaisePropertyChanged(nameof(ShowMutationCommands));
             UpdateMutationSummaries();
+            RefreshMutationHistory();
         }
 
         private void UpdateMutationSummaries()
@@ -662,31 +693,103 @@ namespace Avalonia.Diagnostics.ViewModels
             }
         }
 
-        private static string BuildMutationSummary(string prefix, in MutationEntry entry)
+        private void RefreshMutationHistory()
         {
-            if (entry.Documents is not { Count: > 0 })
+            if (!Dispatcher.UIThread.CheckAccess())
             {
-                return $"{prefix} last change";
+                Dispatcher.UIThread.Post(RefreshMutationHistory, DispatcherPriority.Background);
+                return;
             }
 
-            var documents = entry.Documents;
-            var documentNames = documents
-                .Select(d => !string.IsNullOrWhiteSpace(d.Path)
-                    ? Path.GetFileName(d.Path)
-                    : (d.Envelope?.Document.Path is { Length: > 0 } path ? Path.GetFileName(path) : "Document"))
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            var count = documents.Count;
-            var summary = string.Join(", ", documentNames.Take(3));
-            if (documentNames.Length > 3)
+            if (_mutationDispatcher is null)
             {
-                summary += ", …";
+                _mutationHistory.Refresh(Array.Empty<MutationEntry>(), Array.Empty<MutationEntry>());
             }
-
-            return $"{prefix} ({count} file{(count == 1 ? string.Empty : "s")}): {summary}";
+            else
+            {
+                _mutationHistory.Refresh(_mutationDispatcher.GetUndoHistory(), _mutationDispatcher.GetRedoHistory());
+            }
         }
+
+        private void OnMutationHistoryChanged(object? sender, EventArgs e)
+        {
+            RefreshMutationHistory();
+        }
+
+        private async Task UndoHistoryEntryAsync(MutationHistoryEntryViewModel entry)
+        {
+            if (entry is null)
+            {
+                return;
+            }
+
+            var dispatcher = _mutationDispatcher;
+            if (dispatcher is null)
+            {
+                return;
+            }
+
+            var steps = Math.Max(1, entry.Steps);
+            for (var index = 0; index < steps; index++)
+            {
+                var result = await dispatcher.UndoAsync().ConfigureAwait(false);
+                if (result.Status == ChangeDispatchStatus.Success)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(
+                        () => _runtimeCoordinator.ApplyUndo(),
+                        DispatcherPriority.Background);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                UpdateMutationCommandStates();
+                RefreshMutationHistory();
+            }, DispatcherPriority.Background);
+        }
+
+        private async Task RedoHistoryEntryAsync(MutationHistoryEntryViewModel entry)
+        {
+            if (entry is null)
+            {
+                return;
+            }
+
+            var dispatcher = _mutationDispatcher;
+            if (dispatcher is null)
+            {
+                return;
+            }
+
+            var steps = Math.Max(1, entry.Steps);
+            for (var index = 0; index < steps; index++)
+            {
+                var result = await dispatcher.RedoAsync().ConfigureAwait(false);
+                if (result.Status == ChangeDispatchStatus.Success)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(
+                        () => _runtimeCoordinator.ApplyRedo(),
+                        DispatcherPriority.Background);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                UpdateMutationCommandStates();
+                RefreshMutationHistory();
+            }, DispatcherPriority.Background);
+        }
+
+        private static string BuildMutationSummary(string prefix, in MutationEntry entry) =>
+            MutationHistoryFormatter.BuildSummary(prefix, entry);
 
         private IEnumerable<PropertyViewModel> GetAvaloniaProperties(object o)
         {

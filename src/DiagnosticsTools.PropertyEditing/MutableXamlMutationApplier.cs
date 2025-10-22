@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Avalonia.Diagnostics.Xaml;
 using Microsoft.Language.Xml;
@@ -178,6 +179,8 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 failure = ChangeDispatchResult.MutationFailure(operation.Id, "SetAttribute requires a non-empty value.");
                 return OperationOutcome.Failed(failure);
             }
+
+            newValue = NormalizeAttributeValue(payload.ValueKind, newValue);
 
             if (existingAttribute is not null)
             {
@@ -847,6 +850,34 @@ namespace Avalonia.Diagnostics.PropertyEditing
                 prefix = null;
                 localName = qualifiedName;
             }
+        }
+
+        private static string NormalizeAttributeValue(string? valueKind, string? value)
+        {
+            if (string.IsNullOrEmpty(valueKind) || string.IsNullOrEmpty(value))
+            {
+                return value ?? string.Empty;
+            }
+
+            static bool IsNumericKind(string kind) =>
+                string.Equals(kind, "number", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kind, "double", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kind, "length", StringComparison.OrdinalIgnoreCase);
+
+            if (IsNumericKind(valueKind))
+            {
+                if (double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var invariant))
+                {
+                    return invariant.ToString("G", CultureInfo.InvariantCulture);
+                }
+
+                if (double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out var localized))
+                {
+                    return localized.ToString("G", CultureInfo.InvariantCulture);
+                }
+            }
+
+            return value!;
         }
 
         private static bool TryUpdateCascadeAttributes(MutableXamlElement element, string oldKey, string newKey)
